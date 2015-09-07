@@ -59,11 +59,11 @@ will see later.
           // the if is executed in the first stage
           if (b) 1 else x
         }
-        compute(true)+compute(1==1)
+        compute(true)+compute(3==3)
 
       }
     }
-    assert(snippet.eval(0) === 2)
+    assert(snippet.eval(1) === 2)
     check("1", snippet.code)
   }
 /**
@@ -136,7 +136,7 @@ the second stage, driven by the type of their condition.
 
   test("range1") {
     val snippet = new DslDriver[Int,Unit] {
-      def snippet(x: Rep[Int]) = comment("for", verbose = false) {
+      def snippet(x: Rep[Int]) = comment("for", verbose = true) {
 
         for (i <- (0 until 3): Range) {
           println(i)

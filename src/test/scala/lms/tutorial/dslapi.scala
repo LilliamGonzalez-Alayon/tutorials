@@ -89,6 +89,7 @@ trait DslGen extends ScalaGenNumericOps
     with ScalaGenSeqOps with ScalaGenFunctions with ScalaGenWhile
     with ScalaGenStaticData with ScalaGenVariables
     with ScalaGenObjectOps
+    with ScalaGenImplicitOps 
     with ScalaGenUtilOps {
   val IR: DslExp
 
