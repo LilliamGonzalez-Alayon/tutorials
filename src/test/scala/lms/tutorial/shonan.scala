@@ -67,8 +67,11 @@ class ShonanTest extends TutorialFunSuite { self =>
   // Operators
   case class Sum(x: Expr, y: Expr) extends Expr
   case class Subst(x: Expr, y: Expr) extends Expr
-  case class Mult(x: Expr, y: Expr) extends Expr
+  case class Mult(x: Expr, y: Expr) extends Expr  
   case class Div(x: Expr, y: Expr) extends Expr
+  // how to add a function like sine to case class
+  // add temporary buffercase class extends Expr 
+
 
   class ExprPrinter(expr: Expr) extends Expr {
     val print: Expr => String
@@ -105,6 +108,152 @@ class ShonanTest extends TutorialFunSuite { self =>
           parameters( right ) } 
     } 
   } // end of Class PullVars 
+
+  def scanline(func: Func): ((Int, Int), (Int, Int)) = {
+/*  Purpose - Know which section or "chunk" of the pipeline producer to compute
+    for consumer to use. Given an input object (an image with channels), the x and y Vars 
+    can be Expr like x+1, y-1. 
+
+    - If the traversal is row-major (halide's default), - y outer loop, x inner loop:
+    then the first Var of the func.buffer will have code 0
+    - If the traversal is col-major, - x outer loop, y inner loop:
+    then the first Var of the func.buffer will have code 1
+    - Except if it was fused. If so it will have code 2. 
+
+    The top var will have the start the extent.
+    If row major it will have the first y, if col major it will have  value needs to be calculated 
+    inside the loop and it will depend on the current y or the scanline. It will start by default in y
+    but it can be moved upward when the expr has a minus. The topY value will have
+    how much higher than the original pixel of rows the scanline
+*/  
+	println(" ")
+	println("***********************************************************")
+	println("Testing Scanline Function")
+
+    // identify which Var is in the given expression
+    var varFlagX: Boolean = false
+    var varFlagY: Boolean = false
+
+    // save the start and extent of both x and y
+    var startX: Int = 0 // by default starts at first row 
+    var extentX: Int = 1 // by default just one row
+    var startY: Int = 0 // by default starts at first col
+    var extentY: Int = 1 // by default just one column
+
+    // horizontally...
+    var slideAmountPositiveX: Int = 0 // How much I have moved right? 
+    var slideAmountNegativeX: Int = 0 // How much I have moved left? 
+    // vertically...
+    var slideAmountPositiveY: Int = 0 // How much I have moved? up 
+    var slideAmountNegativeY: Int = 0 // How much I have moved down? 
+
+    // var startAmount: Int = 0 // ???
+
+    println("func.buffer: "+ func.buffer)
+    // 0 - colMajor, 1 - rowMajor, 2 - fused outer loop
+    val codeVar: Int = func.buffer(0).code.get
+    println("codeVar of first Var in order: " + codeVar)
+
+/*  vBlur example
+    val temp4 = Input (inImg, List(x, Subst(y, Operand(1)), c) )
+    val temp5 = Input (inImg, List(x, y, c))
+    val temp6 = Input (inImg, List(x, Sum(y, Operand(1)), c) )
+
+    val hExpr4 = Sum (temp5, temp6)
+    val hExpr5 = Sum (temp4, hExpr4)
+    val hExpr6 = Div (hExpr5, Operand(3.0) )
+*/
+
+    //val scan: Expr => Unit = _ match { 
+    def scan(ex: Expr): Unit = ex match {
+          // outer cases
+          case Div (e1: Expr, o: Operand) => {
+          	println("Found outer div case.")
+            scan(e1) // go deeper if left is an Expr
+          } 
+          case Sum (e1: Expr, e2: Expr) => {
+          	println("Found outer sum case.")
+          	scan(e1) // go deeper if left is an Expr
+          	scan(e2) // go deeper if left is an Expr
+          }
+	          // inner cases input (Sum and Subst)
+	          case Input (inImg, vars) => { // the vars shift in X and Y if any
+	          	println("Found input case.")  
+	          	
+	           // vars foreach ((varsElem) => { // go through all vars 
+				  //slideAmountPositiveX = slideAmountPositiveX + 100
+	              //val shiftExpr: Expr => Unit = _
+	              def matchInnerCases(varsElem: Expr): Unit = varsElem match { 
+	              	//slideAmountPositiveX = 100
+	              	//varsElem match {
+	              	  case Var(nm) => {
+	              	  	// just a Var, no shift
+	              	  	// doesn't change the extent or the start
+
+	              	  	// means that the start default is really zero!!!
+	              	  	println("Found inner Var case.")
+	              	  }
+	                  case Sum(vr@Var(_), op@Operand(_)) => {
+	                  	// check if it's x or y (no outer or inner vars just yet)
+	                    println("Found inner sum case.")
+	                   /* 
+	                   If one of the Inputs has x+1, and another Input has x+2, 
+	                   the extent is not is not 3, it's 2. 
+	                   If one Input has x+1, and another Input has x+1,
+	                   the extent is not 2, it's 1.
+	                   */
+	                    //case Operand(_) => value
+	                    if (vr.code.get == 0) { // moving right
+	                    	var int = ((op.number - slideAmountPositiveX).abs).toInt
+	                    	
+	                    	slideAmountPositiveX = int
+	                    } else if (vr.code.get == 1) { // moving up
+	                    	var int = ((op.number - slideAmountPositiveY).abs).toInt
+	                    	slideAmountPositiveY = int
+	                    } // if channel is color ignore
+						
+						println("slideAmountPositiveY :" + slideAmountPositiveY)
+	                  }
+	                  case Subst(vr@Var(_), op@Operand(_)) => {
+	                  	// check if it's x or y (no outer or inner vars just yet)
+	                  	println("Found inner minus case.")
+
+	                  	if (vr.code.get == 0) { // moving left
+	                    	var int = ((op.number - slideAmountNegativeX).abs).toInt
+	                    	slideAmountNegativeX = int
+	                    } else if (vr.code.get == 1) { // moving down
+	                    	var int = ((op.number - slideAmountNegativeY).abs).toInt
+	                    	slideAmountNegativeY = int
+
+	                    } // if channel is color ignore
+	                  }
+	                }
+	              //} 
+	             matchInnerCases(vars(0)) 
+	             matchInnerCases(vars(1))
+	             // no color channel
+	            //})
+               }
+
+    } // end of def scan
+
+    scan(func.expr)
+
+    // FIX
+    println("slideAmount X: " + slideAmountPositiveX + " , " + slideAmountNegativeX)
+    println("slideAmount Y: " + slideAmountPositiveY + " , " + slideAmountNegativeY)
+
+ 	extentX = (slideAmountPositiveX + slideAmountNegativeX)
+ 	extentY = (slideAmountPositiveY + slideAmountNegativeY)
+    
+    println("topX and extentX: " + startX + " , " + extentX)
+    println("topY and extentY: " + startY + " , " + extentY)
+    println("***********************************************************")
+    println(" ")
+
+    ((startX, extentX), (startY, extentY))
+
+  } // end of def scanline
 
   class Func(val nm: String, val args: List[Var], val expr: Expr) {
     /* args: List[Var] -- Original list of Vars before any scheduling.
@@ -546,22 +695,18 @@ class ShonanTest extends TutorialFunSuite { self =>
 
       val hExpr1 = Sum (temp2, temp3)
       val hExpr2 = Sum (temp1, hExpr1)
-      val hExpr3 = Div (hExpr2, Operand(3.0) )
-
-      //val hBlur = new Func("horizontal_blur" , List(x, y, c), hExpr3)
+      val hExpr3 = Div (hExpr2, Operand(3.0))
       val hBlur = new Func("horizontal_blur" , List(x, y, c), hExpr3)
 
 
-     /* val temp4 = Input (inImg, List(x, Subst(y, Operand(1)), c) )
+      val temp4 = Input (inImg, List(x, Subst(y, Operand(2)), c) )
       val temp5 = Input (inImg, List(x, y, c))
       val temp6 = Input (inImg, List(x, Sum(y, Operand(1)), c) )
 
       val hExpr4 = Sum (temp5, temp6)
       val hExpr5 = Sum (temp4, hExpr4)
-      val hExpr6 = Div (hExpr5, Operand(3.0) )
-
-      //val hBlur = new Func("horizontal_blur" , List(x, y, c), hExpr3)
-      val vBlur = new Func("vertical_blur" , List(x, y, c), hExpr6)*/
+      val hExpr6 = Div (hExpr5, Operand(3.0))
+      val vBlur = new Func("vertical_blur" , List(x, y, c), hExpr6)
 
       // Test Basic Scheduling Functions 
       println("Applying a Schedule...")
@@ -894,19 +1039,19 @@ class ShonanTest extends TutorialFunSuite { self =>
             val vrColor: Var = vars(2).asInstanceOf[Var] 
 
             if (env(vrColor.nm) == 0) {
-                println("red channel")
+                //println("red channel")
                 colorChl = (colour & 0x00FF0000) >>> 16  
                 colorNm = "R"
             } else if (env(vrColor.nm) == 1) {
-                println("green channel")
+               // println("green channel")
                 colorChl = ( colour & 0x0000FF00 ) >>> 8
                 colorNm = "G"
             } else if (env(vrColor.nm) == 2) {
-                println("blue channel")
+                //println("blue channel")
                 colorChl = colour & 0x000000FF
                 colorNm = "B"
             }
-            println("color channel at input " + colorChl.toDouble)
+            //println("color channel at input " + colorChl.toDouble)
             colorChl.toDouble
             
 
@@ -960,7 +1105,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 
                     for (c <- (0 until 3): Range) {
                     // Function with an input image 
-                      println( "3 chls For loop" )
+                      //println( "3 chls For loop" )
                       //Rep[Int]
                       val pixelChl = (evaluateExpr(func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img)).toInt
                       //newRGB( c ) = minRep(pixelChl) 
@@ -968,24 +1113,24 @@ class ShonanTest extends TutorialFunSuite { self =>
                 
                       newRGB(c) = pixelChl // clamp to 255 
                       //newRGB(c) = minRep(pixelChl) // clamp to 255
-                      println( "CC after eva: " + newRGB( c ) )
-                      println( " " )
+                      //println( "CC after eva: " + newRGB( c ) )
+                      //println( " " )
                     }
 
                     //FIX: clamp outside loop?
-                    println( "Out of 3 chls For loop" )
+                    //println( "Out of 3 chls For loop" )
                     val newR = newRGB( 0 )
                     val newG = newRGB( 1 )
                     val newB = newRGB( 2 )
 
-                    println( "5. Type Int | red: " + newR + " - green: " + newG + " - blue: " + newB /*+ " - alpha: " + a*/ )
+                    //println( "5. Type Int | red: " + newR + " - green: " + newG + " - blue: " + newB /*+ " - alpha: " + a*/ )
                     val alpha = 255 << 24
                     val alpha2 = unit(alpha)
                     //println("alpha...")
                     // ( 255 << 24 )
                     //val pixelColor : Rep[Int] = ( 255 << 24 ) | ( newR << 16 ) | ( newG << 8 ) | newB
                     val pixelColor = unit(alpha) | ( newR << 16 ) | ( newG << 8 ) | newB
-                    println("pixel color " + pixelColor)
+                    //println("pixel color " + pixelColor)
                     img(xValue)(yValue) = pixelColor
                     //img(x).update(y, pixelColor)
                     //println( "final color: " + fnl )
@@ -1035,9 +1180,21 @@ class ShonanTest extends TutorialFunSuite { self =>
         } // end of def realize
 
       /////////////////////////////////////////////////////////////////////////////////////////////////
+      // Test scanlineExtent Function
+      // vBlur
+      /*val sl: Scanline = new Scanline(vBlur)
+        println("Scanline Function Test: " + sl.scanline(vBlur.expr))
+        println("Scanline Function Test: " + sl.start)
+        println("Scanline Function Test: " + sl.extent)*/
+
       //realize(brighter, width, height, imgArray)
-      realize(hBlur, width, height, imgArray)
-      //realize(vBlur, width, height, imgArray)
+      //realize(hBlur, width, height, imgArray)
+      realize(vBlur, width, height, imgArray)
+
+      //val instExpr: ExprPrinter = new ExprPrinter(expr)
+      //println("test: " + inst.print(expr))
+
+	  scanline(vBlur)
 
       val outputImage: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
       
@@ -1054,8 +1211,9 @@ class ShonanTest extends TutorialFunSuite { self =>
       } // end of def snippet
     } // end of val snippet
 
-    snippet.eval()
+    //snippet.eval()
     check("shonan-hmm1c", snippet.code)
 
   } // end of test Halide
 } // end of class HalideTest
+
