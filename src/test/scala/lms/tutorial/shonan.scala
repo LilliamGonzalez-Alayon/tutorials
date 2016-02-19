@@ -14,6 +14,26 @@ import javax.imageio.ImageIO
 import javax.swing.ImageIcon
 import scala.math._
 
+/* TODO
+** Test basic schedule functions:
+** (Produces a brigther image?)
+**    ✓ Fuse sequencially (x and y) 
+**    ✓ Fuse sequencially (split x and y, and then fuse back together) 
+**    ✓ Split sequencially (only one Var) 
+**    ✓ Split sequencially (two Vars) 
+**    ✓ Split, fuse, split again 
+**    ✓ Split when does not divide img dimesion (extent)
+**    ✓ Tiling sequencially
+**    ✓ Tiling sequencially with shortcut
+**      - test more!
+**
+** _Track functions inside xyEval; get rid of ugly code replication! ...in progress
+** ✓ Change the ._#s for readability 
+** _ comments and organize code <- next!
+** _Vectorize ...in progress <- next!
+** _Parallelize - later! (Delite; work sequencially for now)
+** _Generate C code
+**/ 
 
 class ShonanTest extends TutorialFunSuite { self =>
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -26,6 +46,8 @@ class ShonanTest extends TutorialFunSuite { self =>
   val width: Int = inImg.getWidth 
   val height: Int = inImg.getHeight
   val imgArray = Array.ofDim[Int](width, height)
+  // TODO: declare here?
+  val slArray: Array[Array[Int]]
 
   for (x <- 0 until width; y <- 0 until height) {
     val colour: Int = inImg.getRGB(x, y)
@@ -55,6 +77,8 @@ class ShonanTest extends TutorialFunSuite { self =>
     var codeFused: Boolean = false 
     // for a split Var: (first set equal to parent), inner -> 0, outer -> 1
     var codeSplit: Option[Int] = None 
+
+    var codeInject: Boolean = false
   }
   //case class Input(val inputImg: BufferedImage, val vars: List[Var]) extends Expr
   case class Input(val inputImg: BufferedImage, val vars: List[Expr]) extends Expr 
@@ -109,9 +133,108 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 /*
   def detectEdge(func: Func): (Boolean, which edge) = {
+	// Edges matter only if it comes from an input,
+	   if it's from a point 
 
   }
 */
+
+  class Func(val nm: String, val args: List[Var], val expr: Expr) {
+    /* args: List[Var] -- Original list of Vars before any scheduling.
+    **
+    ** buffer: ListBuffer[Var] -- Scheduled Vars and ordering.
+    **
+    ** bounds: Map[Var, (Int,Int)] -- Map the scheduled Var to its bound.
+    ** The Pair of Ints are later used by completeBounds function.
+    **
+    ** If it finds a 0, then the Var is the original x or y (was not split
+    ** or fused). The bounds are then the image dimensions. If it finds a -1
+    ** further calculation is need. Or it can be the bound itself if finds a number > 0. 
+    ** The second Int will carry the splitFactor used in calculations during 
+    ** completeBounds call. By default it's -1.
+    **
+    ** track: Map[Var, (ListBuffer[Var], Boolean, Boolean, Int)] -- Map Var
+    ** to a List of nested Vars (tracks how the original Vars have been split
+    ** or fused). When a new Var is created it will also have its entry in the Map.
+    ** (Not empty:).
+    **
+    ** par: Map[Var, Boolean] -- Map a Var to true if has been parallelized,.
+    ** or false otherwise.
+    **/ 
+
+    // Var code to no depend on Strings like Var("x_inner")...
+    // Restricting first Var to x (width) and second to y (height)...
+    args(0).code = Some(0)
+    args(1).code = Some(1)
+
+    // Initially consume from no other function
+    // var code: Option[Int] = None 
+    var consumeFrom: Option[Func] = None
+    // Ordering of vars from consumer
+    // FIX: should it matter? as long as they calculate the right script?
+    var producerOrderColMajor: Boolean = false
+
+    /* Store producer scanline values from scanline function within the function
+       to avoid sending it to genloop as long list of parameters, and to avoid computing them
+       over and over again everytime genloop is recursively called (for each pixel!)
+    */
+    // Store as pair of pairs or individually for readability!
+    var extX: Option[Int] = None
+    var extY: Option[Int] = None
+    var stX: Option[Int] = None
+    var stY: Option[Int] = None
+
+    var prodW: Option[Int] = None
+    var prodH: Option[Int] = None
+
+    // don't have dimensions yet, need to wait....
+    //var slArray = new Array[Array[Nothing]](2) 
+    //var emptyArray =  Array[Array.empty[Int]]
+    //var slArray = new Array[Array[Int]](2) = Array(null, null)
+
+    var buffer = new ListBuffer[Var]()
+
+    // Remove the color channel, since it has nothing to do with the order of evaluation.
+/* FIX -> We are removing the last Var, assuming it's always the third Var.
+          But right now we are always removing the last Var, which is incorrect if there is no color channel.
+*/
+    def initialScheduleList(lst: List[Var]): ListBuffer[Var] = lst match {
+      case h::Nil => buffer
+      case h::t => {
+        buffer += h
+        initialScheduleList(t)
+      }
+    }
+
+    initialScheduleList(args)
+    println("Func Args: " + args)
+    println("Initial Func Scheduled Args: " + buffer)
+    println("")
+    println(nm + " Function's Maps...")
+
+    // Bounds Map -- Map[Var, (Int,Int)]
+    val bounds = scala.collection.mutable.Map() ++ (buffer map (p => (p, (0,-1) )))
+    println("Bounds Map: " + bounds)
+
+    // Track Map -- Map[Var, (ListBuffer[Var], Boolean, Boolean, Int)] 
+    // first Boolean split, second Boolean fuse
+    val track = scala.collection.mutable.Map() ++ (buffer map (p => (p, (ListBuffer(p), false, false, -1) )))
+    println("Track Map: " + track)
+
+    // Parallel Map -- Map[Var, Boolean]
+    val par = scala.collection.mutable.Map() ++ (buffer map (p => (p, (false))) )
+    println("Parallel Map: " + par)
+    println("")
+
+    val inst: ExprPrinter = new ExprPrinter(expr)
+    println("Evaluation of Func Expr: " + inst.print(expr))
+    println("")
+  } // end of Class Func */
+
+  ////////////////////////////////////////////////////////////////////////////////////////////
+  // 1. Scheduling Functions (Multi-stage Pipelines)
+  ////////////////////////////////////////////////////////////////////////////////////////////
+
   def scanline(func: Func): ((Int, Int), (Int, Int)) = {
 /*  Purpose - Know which section or "chunk" of the pipeline producer to compute
     for consumer to use. Given an input object (an image with channels), 
@@ -282,75 +405,37 @@ class ShonanTest extends TutorialFunSuite { self =>
 
   } // end of def scanline
 
-  class Func(val nm: String, val args: List[Var], val expr: Expr) {
-    /* args: List[Var] -- Original list of Vars before any scheduling.
-    **
-    ** buffer: ListBuffer[Var] -- Scheduled Vars and ordering.
-    **
-    ** bounds: Map[Var, (Int,Int)] -- Map the scheduled Var to its bound.
-    ** The Pair of Ints are later used by completeBounds function.
-    **
-    ** If it finds a 0, then the Var is the original x or y (was not split
-    ** or fused). The bounds are then the image dimensions. If it finds a -1
-    ** further calculation is need. Or it can be the bound itself if finds a number > 0. 
-    ** The second Int will carry the splitFactor used in calculations during 
-    ** completeBounds call. By default it's -1.
-    **
-    ** track: Map[Var, (ListBuffer[Var], Boolean, Boolean, Int)] -- Map Var
-    ** to a List of nested Vars (tracks how the original Vars have been split
-    ** or fused). When a new Var is created it will also have its entry in the Map.
-    ** (Not empty:).
-    **
-    ** par: Map[Var, Boolean] -- Map a Var to true if has been parallelized,.
-    ** or false otherwise.
+  def computeAt(consumer: Func, producer: Func, variable: Var): Unit = {
+  	/* To inject the two for loops of producer into consumer's loopMap.
+    ** User will call it, and then call realize on the consumer only, not the producer.
+    ** User must identify the code of the Var before calling the function, else it
+    ** will throw an exception.
     **/ 
 
-    // Var code to no depend on Strings like Var("x_inner")...
-    // Restricting first Var to x (width) and second to y (height)...
-    args(0).code = Some(0)
-    args(1).code = Some(1)
+    consumer.consumeFrom = Some(producer)
 
-    var buffer = new ListBuffer[Var]()
+    // x -> 0, y -> 1
+    if (variable.code == None)
+       throw new IllegalArgumentException("Compute At Var does not have code and rowMajor or colMajor ordering can't be determined...")
+    else if (variable.code.get == 0)
+    	consumer.producerOrderColMajor = true
+    /* 
+       -> false by default (default Row Major!
+       else if (variable.code.get == 1)
+       consumer.producerOrderColMajor = true 
+    */
+    	// Call scanline
+    	// ((startX, extentX), (startY, extentY))
+	    val slValues: ((Int, Int), (Int, Int)) = scanline(consumer)
+	    consumer.stX = Some((slValues._1)._1)
+	    consumer.extX  = Some((slValues._1)._2) 
+	    consumer.stY = Some((slValues._2)._1)  
+	    consumer.extY = Some((slValues._2)._2)  
 
-    // Remove the color channel, since it has nothing to do with the order of evaluation.
-/* FIX -> We are removing the last Var, assuming it's always the third Var.
-          But right now we are always removing the last Var, which is incorrect if there is no color channel.
-*/
-    def initialScheduleList(lst: List[Var]): ListBuffer[Var] = lst match {
-      case h::Nil => buffer
-      case h::t => {
-        buffer += h
-        initialScheduleList(t)
-      }
-    }
-
-    initialScheduleList(args)
-    println("Func Args: " + args)
-    println("Initial Func Scheduled Args: " + buffer)
-    println("")
-    println(nm + " Function's Maps...")
-
-    // Bounds Map -- Map[Var, (Int,Int)]
-    val bounds = scala.collection.mutable.Map() ++ (buffer map (p => (p, (0,-1) )))
-    println("Bounds Map: " + bounds)
-
-    // Track Map -- Map[Var, (ListBuffer[Var], Boolean, Boolean, Int)] 
-    // first Boolean split, second Boolean fuse
-    val track = scala.collection.mutable.Map() ++ (buffer map (p => (p, (ListBuffer(p), false, false, -1) )))
-    println("Track Map: " + track)
-
-    // Parallel Map -- Map[Var, Boolean]
-    val par = scala.collection.mutable.Map() ++ (buffer map (p => (p, (false))) )
-    println("Parallel Map: " + par)
-    println("")
-
-    val inst: ExprPrinter = new ExprPrinter(expr)
-    println("Evaluation of Func Expr: " + inst.print(expr))
-    println("")
-  } // end of Class Func */
+  } // end of def computeAt 
 
   ////////////////////////////////////////////////////////////////////////////////////////////
-  // Scheduling Functions (Order of Domain Evaluation)
+  // 2. Scheduling Functions (Order of Domain Evaluation)
   ////////////////////////////////////////////////////////////////////////////////////////////
 
     // insert the fused Var along the Vars that are fused.
@@ -675,21 +760,52 @@ class ShonanTest extends TutorialFunSuite { self =>
       println("")
     } //end of def getBounds
 
-
-    def finalList (xs: List[Var], flist: ListBuffer[(Var, Int)], fn: Func): Unit = { 
+    // 0 for y, 1 for x?
+    def finalList (xs: List[Var], flist: ListBuffer[(Var, Option[Int])], fn: Func, position: Int, scheduling: Var): Unit = { 
       /* Called from within realize function.
       ** It's purpose is to create a final list with the scheduled order and the completed bounds.
+      ** Send scheduling Vars separately because I will loose them as finalList recurses.
       **/
+
+      /* TODO: Finish cases!
+		-> If Vars have not been split or fused:
+			Insert at second position, and third position ...
+		-> If Vars have been split (tiling):
+			Insert after two outer Vars ...
+		-> If Vars have been fused (vectorization):
+
+      */
 
       xs match {
         case Nil => 
           println("Final List with order and bounds: " + flist)
+
         case x::xs1 => {
-          val varCurr = x
-          val bound = fn.bounds(varCurr)
-          val bound1 = bound._1
-          flist += { (x, bound1) }
-          finalList(xs1,flist,fn)
+          //val varCurr = x
+          //val bound = fn.bounds(varCurr)
+          //val bound1 = bound._1
+
+          if ( position == 2 || position == 3 ) {
+          	// Insert Vars of injected loops
+          	// TODO: Testing first Var may not be enough
+          	// So, create a function that precomputes the scheduling scheme before hand!
+
+          	if ( scheduling.codeFused == false && scheduling.codeSplit == None ) {
+ 				// TODO: Var codes?
+ 				val injectVar = new Var("Injected Var: " + position.toString)
+ 				injectVar.codeInject = true
+          		flist += { (injectVar, None) }
+          	}
+      	  } else { 
+      	    // Insert Vars of the consumer
+      	  	val varCurr = x
+          	val bound = fn.bounds(varCurr)
+          	val bound1 = bound._1
+            flist += { (x, Some(bound1)) }
+      	  }
+
+      	  var incrementedPos = position + 1
+          finalList(xs1, flist, fn, incrementedPos, scheduling)
         }
       } 
     } // end of finalList
@@ -725,12 +841,10 @@ class ShonanTest extends TutorialFunSuite { self =>
       val hExpr3 = Div (hExpr2, Operand(3.0))
       val hBlur = new Func("horizontal_blur" , List(x, y, c), hExpr3)
 
-
       val temp4 = Input (inImg, List(x, Subst(y, Operand(2)), c) )
       val temp5 = Input (inImg, List(x, y, c))
       //val temp6 = Input (inImg, List(x, Sum(y, Operand(1)), c) )
       val temp6 = Input (inImg, List(x, y, c) )
-
 
       val hExpr4 = Sum (temp5, temp6)
       val hExpr5 = Sum (temp4, hExpr4)
@@ -966,6 +1080,9 @@ class ShonanTest extends TutorialFunSuite { self =>
         def xyEval (func: Func, loopMap: Map[Var, Rep[Int]], imgWidth: Int, imgHeight: Int): (Rep[Int], Rep[Int]) = {
           /* The Loopmap holds the bounds of the for loops.
           ** Find the x and y that will mapped in EvaluateExpr.
+          ** The x and y can be different depending of what scheduling is used.
+          ** For example, if it was fused it will be: varVal = ((loop(lookUpFused(0)) % w)).toInt 
+          **
           ** For each, x and y, calls trackVar function, which in turn calls trackNestedVar (if necessary).
           ** Returns a pair of Rep[Int], the x and y
           */ 
@@ -976,13 +1093,13 @@ class ShonanTest extends TutorialFunSuite { self =>
 
       ////////////////////////////////////////////////////////////////////////////////////////////
       // New Evaluate class [has to be here because of rep]
+      // TODO: add scanlineArray Option Rep[Array[Array[Int]]]
       def evaluateExpr(expr: Expr, env: String => Rep[Double], array: Rep[Array[Array[Int]]]): Rep[Double] = { 
 
         def eval(expr: Expr): Rep[Double] = expr match {
           case Var(nm) => env(nm)
           case Input (inImg, vars) => { 
             // Vars can be Vars or Expr
-
             //apply (i : Int) : A , The element at given index.
             //val color: Rep[Int] = img(1).apply(2) // Source Context error
             
@@ -1080,6 +1197,7 @@ class ShonanTest extends TutorialFunSuite { self =>
                 colorChl = colour & 0x000000FF
                 colorNm = "B"
             }
+
             //println("color channel at input " + colorChl.toDouble)
             colorChl.toDouble
             
@@ -1104,31 +1222,52 @@ class ShonanTest extends TutorialFunSuite { self =>
       } // end of def evaluateExpr 
 
       ////////////////////////////////////////////////////////////////////////////////////////////
-      def genLoop(func: Func, xs: List[(Var, Int)], xs2: List[(Var, Rep[Int])], array: Array[Array[Int]]): Unit = { 
-        val img = staticData(array)
+      def genLoop(func: Func, xs: List[(Var, Option[Int])], xs2: List[(Var, Rep[Int])], array: Array[Array[Int]], arraySL: Option[Array[Array[Int]]], initialCall: Boolean): Unit = { 
+        /* xs - final list with order and bounds
+        ** xs2 - empty list in which we will generate the loopmap
+        ** initial - one way to identify when to calculate first scanline!
+        ** Added: arraySL which will be sent from realize
+        */
 
+        val img = staticData(array)
+        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
+        val imgH = array.length // gives me y (height), not x (width)
+        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
+          
+          // create loopMap from List
           xs match {
             case Nil => {
+              // For each pixel we will enter the nil case once and evaluate the pixel color.
+              // xs2 will have one of these maps (corresponding to the single pixel).
+              //> Map(y -> 0, x -> 0, c -> 0)
+              //| Map(y -> 0, x -> 0, c -> 1)
+              //| Map(y -> 0, x -> 1, c -> 0)
+              //| Map(y -> 0, x -> 1, c -> 1)
+              //| Map(y -> 1, x -> 0, c -> 0)
+              //| Map(y -> 1, x -> 0, c -> 1)
+              //| Map(y -> 1, x -> 1, c -> 0)
+              //| Map(y -> 1, x -> 1, c -> 1)
+           
               val loops = Map() ++ (xs2 map (pairs => (pairs._1, pairs._2)))
               // println("Loops Generated with schedule: " + loops)
 
               // Get the array dimesions for fused Var case. 
               val arrayH = array.length // gives me y (height), not x (width)
-              val arrayW = array(0).length // Array of two dimesions is an array inside an array. 
-
+              val arrayW = array(0).length // Array of two dimesions (an array inside an array). 
               val xyPair = xyEval(func, loops, arrayW, arrayH)
               val xValue = xyPair._1
               val yValue = xyPair._2
               
               //println("--------------------------------------------------------------------------------------")
               /////////////////////////////////////////////////////////////////////////////////////////////////////////
-                  if (func.args.length == 2) { 
-                  // Function without an input image
+                  if (func.args.length == 2) { // Function without an input image
+
                     val pixelColor = (evaluateExpr(func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img)).toInt
                     img(xValue)(yValue) = pixelColor // unmodified x and y
                     //img(x).update(y, pixelColor)
 
                   } else { // Function with an input image
+
                     //val newRGB = NewArray[Int](3)
                     val newRGB = new Array[Rep[Int]](3)
 
@@ -1171,14 +1310,71 @@ class ShonanTest extends TutorialFunSuite { self =>
               // x._2 has bound
               val parBool = func.par getOrElse (x._1, false)
               // parBool = parPair._2
+
+              // New Try! Check if the value of the first Var has changed...
+              // TODO: finish cases, this only works if Vars x and y werent split or fused
+              // If the were split for tiling, then it would be different...
+              // The scanline dimensions will change to a tile, not a scanline!
+              // a%b = a - (a/b)*b
+              val currVal1Var = xs2(0)._2
+              val var1ModImgW = (currVal1Var) - (currVal1Var/imgW)* imgW
+              val var1ModImgH = (currVal1Var) - (currVal1Var/imgH)* imgH
+
+              // TODO: calculate real numbers for injected Vars
+              var provisional: Rep[Int] = unit(2)
+
+              if (!func.producerOrderColMajor && initialCall == false) { 
+			  // rowMajor - default case
+				if (var1ModImgW == 0) {
+					// ASKPROF: % not member of Rep[Int]
+					// start of a new row! new scanline! (except when the extentY is more than 1)
+					genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, provisional)), array, arraySL, false) 
+				}
+			  } else { 
+			  // colMajor
+				if ( var1ModImgH == 0) {
+					// start of a new column! new scanline! (except when the extentX is more than 1)
+					genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, provisional)), array, arraySL, false) 
+				}
+			  }
+
               if (!parBool) {
-                // For each Var create a for loop with the bound. First Var on List will be outer loop, and so on...
-                for (x0 <- (0 until x._2): Rep[Range]) 
-                  genLoop(func, xs1, xs2 ++ List((x._1, x0)), array)
+                // For each Var create a for loop with the bound. 
+                // First Var on List will be outer loop, and so on...
+
+                // TODO: how to inject new loop correclty in xs2?
+                 	  //> Map(y -> 0, injected1 -> 0, injected2 -> 0, x -> 0)
+                      //| Map(y -> 0, injected1 -> 0, injected2 -> 0, x -> 1)
+                      //| Map(y -> 0, injected1 -> 0, injected2 -> 1, x -> 0)
+                      //| Map(y -> 0, injected1 -> 0, injected2 -> 1, x -> 1)
+                      //| Map(y -> 0, injected1 -> 1, injected2 -> 0, x -> 0)
+                      //| Map(y -> 0, injected1 -> 1, injected2 -> 0, x -> 1)
+                      //| Map(y -> 0, injected1 -> 1, injected2 -> 1, x -> 0)
+                      //| Map(y -> 0, injected1 -> 1, injected2 -> 1, x -> 1)
+     				  //| Map(y -> 1, injected1 -> 0, injected2 -> 0, x -> 0)
+     				  //| Map(y -> 1, injected1 -> 0, injected2 -> 0, x -> 1)
+                      //| Map(y -> 1, injected1 -> 0, injected2 -> 1, x -> 0)
+                for (x0 <- (0 until x._2.get): Rep[Range]) {
+                /*
+                  // TODO: test if function will consume from another one
+                  // WRONG! first var will be a non-injected and the pixel will be evaluated without the NOTHING
+                  // of the scanline computed!
+                  if (x._2.codeInjected) 
+                    // None means it's an injected Var
+                    // genLoop will be called with the producer function and scanline array 
+                    // to evaluate the color and store it in the producer
+                    genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, x0)), array) //TODO: change to scanlineArray
+                  else {*/
+                  	genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
+                  //}
+                }
+
+              // parallel .par
               } else {
-                 for (x0 <- (0 until x._2): Rep[Range]) // parallel .par
-                  genLoop(func, xs1, xs2 ++ List((x._1, x0)), array)
+                 for (x0 <- (0 until x._2.get): Rep[Range]) 
+                  genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
               }
+
           } // end of case
         } // end of xs match
       } // end of def genLoop
@@ -1186,46 +1382,101 @@ class ShonanTest extends TutorialFunSuite { self =>
       ////////////////////////////////////////////////////////////////////////////////////////
       // Realize Function
       ////////////////////////////////////////////////////////////////////////////////////////
-        def realize(func: Func, w: Int, h: Int, array: Array[Array[Int]]): Unit = { 
+        def realize(func: Func, w: Int, h: Int, array: Array[Array[Int]]/*, arrayS: Option[Array[Array[Int]]]*/): Unit = { 
           println("Realizing " + func.nm + " Func") // will be printed in generated code...
+
           val width: Int = w 
           val height: Int = h 
           //reflectMutableSym(img.asInstanceOf[Sym[Any]])
 
+          var producerW: Int = 0
+		  var producerH: Int = 0
+       
+            // Determine the size of the producer allocation and save it within the func itself.
+	        if (func.consumeFrom != None) {  
+	          // TODO: classify a function strategy! here -> if (func.Scheduling = sequencialComputation)
+
+	          	//ASKPROF cant be empty, cant use .ofDim
+	          	//val slArray2: Array[Array[Int]]
+	          	//val slArray2 = Array.ofDim[Int](100, 100)
+
+		        // Allocate space (correct amount of space for the strip of producer!)
+		        // Sequencial order: row or col size plus extents 
+		        // Tiling tile size + plus extents
+		        // vectorization?
+				// Get the array dimesions for testing if the evaluated Expr is out of bounds. 
+		        val imgH = array.length // gives me y (height), not x (width)
+		        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
+
+	        	if (!func.producerOrderColMajor) { 
+				// rowMajor - default case
+					producerW = width + func.extX.get
+					if (func.extY.get != 0) {
+						producerH = 1 + func.extY.get
+					} else 
+						producerH = 1
+
+				} else { 
+				// colMajor
+					producerH = height + func.extY.get
+					if (func.extX.get != 0) {
+						producerW = 1 + func.extX.get
+					} else 
+						producerW = 1
+				}
+				
+				func.prodH = producerH 
+			    func.prodW = producerW 
+
+			    val injArray = Array.ofDim[Int](producerW, producerH)
+  		  		// TODO: declare here?
+
+	        } // end of if (func.consumer != None)
+		
           // Complete func's bounds map with the image dimensions.
           completeBounds(func, width, height)
 
           // Convert the order ListBuffer of Vars from func to List.
           val funcList = func.buffer.toList
-          val finalListBuffer = new ListBuffer[(Var, Int)]()
+          // None means it's an injected var
+          val finalListBuffer = new ListBuffer[(Var, Option[Int])]() 
 
           // Modify the newly (empty) created ListBuffer[(Var, Int)].
           // This ListBuffer will now have the order and all the loop bounds.
-          finalList(funcList, finalListBuffer, func) 
+          finalList(funcList, finalListBuffer, func, 1, func.buffer(0)) 
+          // TODO: func.buffer(0) not enough to test first Var!
+
+          // edit final? No, can't put the producer's vars in the final list because
+          // genloops will stop at Nil and then evaluate the expression.
           val fnlList = finalListBuffer.toList
           
           println("Generating loopMap")
-          genLoop(func, fnlList, Nil, array)
+          if (func.consumeFrom != None) { 
+            //val arrayS: Option[Array[Array[Int]]] = Some(Nil)
+          	genLoop(func, fnlList, Nil, array, injArray/*Some(func.slArray)*/, true) 
+          }
+          else 
+            genLoop(func, fnlList, Nil, array, None, true)
         } // end of def realize
 
       /////////////////////////////////////////////////////////////////////////////////////////////////
-      // Test scanlineExtent Function
-      // vBlur
-      /*val sl: Scanline = new Scanline(vBlur)
-        println("Scanline Function Test: " + sl.scanline(vBlur.expr))
-        println("Scanline Function Test: " + sl.start)
-        println("Scanline Function Test: " + sl.extent)*/
-
       //realize(brighter, width, height, imgArray)
       //realize(hBlur, width, height, imgArray)
+
+      // TODO: where to allocate:
+      // cant be genloops for sure
+      // computeAt
+      // send as Some(array) or None if there are no 
       realize(vBlur, width, height, imgArray)
 
       //val instExpr: ExprPrinter = new ExprPrinter(expr)
       //println("test: " + inst.print(expr))
 
 	  // Test various functions for start and extents ...................
-	  scanline(vBlur)
-	  scanline(hBlur)
+	  //scanline(vBlur)
+	  //scanline(hBlur)
+
+	  // Test consumer and producer Schedule!
 
       val outputImage: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
       
