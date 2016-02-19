@@ -231,16 +231,16 @@ class ShonanTest extends TutorialFunSuite { self =>
     println("")
   } // end of Class Func */
 
-  ////////////////////////////////////////////////////////////////////////////////////////////
-  // 1. Scheduling Functions (Multi-stage Pipelines)
-  ////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+// 1. Scheduling Functions (Multi-stage Pipelines)											
+////////////////////////////////////////////////////////////////////////////////////////////
 
   def scanline(func: Func): ((Int, Int), (Int, Int)) = {
-/*  Purpose - Know which section or "chunk" of the pipeline producer to compute
-    for consumer to use. Given an input object (an image with channels), 
-    the x and y Vars can be Exprs like x+1, y-1. 
+	/* Purpose - Know which section or "chunk" of the pipeline producer to compute
+    ** for consumer to use. Given an input object (an image with channels), 
+    ** the x and y Vars can be Exprs like x+1, y-1. 
+	*/ 
 
-*/  
 	println(" ")
 	println("***********************************************************")
 	println("Testing Scanline Function")
@@ -327,7 +327,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 	               the extent is not is not 3, it's 2. 
 	               If one Input has x+1, and another Input has x+1,
 	               the extent is not 2, it's 1.
-
 	               They cannot be added on top of each other.
 	            */
                 //case Operand(_) => value
@@ -343,7 +342,7 @@ class ShonanTest extends TutorialFunSuite { self =>
                 	slideAmountPositiveY = int
                 	slideY = true
                 } 
-                // if channel is color ignore
+                // if channel is color, ignore
 
 				println("slideAmountPositiveY: " + slideAmountPositiveY)
               }
@@ -405,11 +404,17 @@ class ShonanTest extends TutorialFunSuite { self =>
 
   } // end of def scanline
 
+  def testFuncSchedule(func: Func, ) : Int = {
+  	/* Determine the domain scheduling of a function. 
+    ** We need it to know how are we going to detect that we need to calculate another scanline
+    **/ 
+  }
+
   def computeAt(consumer: Func, producer: Func, variable: Var): Unit = {
   	/* To inject the two for loops of producer into consumer's loopMap.
     ** User will call it, and then call realize on the consumer only, not the producer.
-    ** User must identify the code of the Var before calling the function, else it
-    ** will throw an exception.
+    ** User must identify the code of the Var before calling the function, 
+    ** else it will throw an exception.
     **/ 
 
     consumer.consumeFrom = Some(producer)
@@ -424,25 +429,26 @@ class ShonanTest extends TutorialFunSuite { self =>
        else if (variable.code.get == 1)
        consumer.producerOrderColMajor = true 
     */
-    	// Call scanline
-    	// ((startX, extentX), (startY, extentY))
-	    val slValues: ((Int, Int), (Int, Int)) = scanline(consumer)
-	    consumer.stX = Some((slValues._1)._1)
-	    consumer.extX  = Some((slValues._1)._2) 
-	    consumer.stY = Some((slValues._2)._1)  
-	    consumer.extY = Some((slValues._2)._2)  
+
+	// Call scanline
+	// ((startX, extentX), (startY, extentY))
+    val slValues: ((Int, Int), (Int, Int)) = scanline(consumer)
+    consumer.stX = Some((slValues._1)._1)
+    consumer.extX = Some((slValues._1)._2) 
+    consumer.stY = Some((slValues._2)._1)  
+    consumer.extY = Some((slValues._2)._2)  
 
   } // end of def computeAt 
 
-  ////////////////////////////////////////////////////////////////////////////////////////////
-  // 2. Scheduling Functions (Order of Domain Evaluation)
-  ////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////
+// 2. Scheduling Functions (Order of Domain Evaluation)
+////////////////////////////////////////////////////////////////////////////////////////////
 
-    // insert the fused Var along the Vars that are fused.
-    def insert[A](e: ListBuffer[A], n: Int, ls: ListBuffer[A]): ListBuffer[A] = {
-      ls.splitAt(n) match {
-      case (pre, post) => pre ++ e ++ post }
-    }
+	// insert the fused Var along the Vars that are fused.
+	def insert[A](e: ListBuffer[A], n: Int, ls: ListBuffer[A]): ListBuffer[A] = {
+	  ls.splitAt(n) match {
+	  case (pre, post) => pre ++ e ++ post }
+	}
 
 // TODO: order doesn't have to be a ListBuffer 
     def reorder (func: Func, order: ListBuffer[Var]): Unit = { 
@@ -941,6 +947,7 @@ class ShonanTest extends TutorialFunSuite { self =>
         ////////////////////////////////////////////////////////////////////////////////////////////
         // xyEval Helper Functions 
         ////////////////////////////////////////////////////////////////////////////////////////////
+
         // Only for testing the shifting of last tile in the case of splitFactor not diving the img extent.
         def minExt(num1: Rep[Int], num2: Rep[Int]): Rep[Int] = {
           var num = 0
@@ -1324,17 +1331,23 @@ class ShonanTest extends TutorialFunSuite { self =>
               var provisional: Rep[Int] = unit(2)
 
               if (!func.producerOrderColMajor && initialCall == false) { 
-			  // rowMajor - default case
+			  // rowMajor sequential - default case
+
+			  	// create new List of Vars and bounds for the injected Vars
+			  	List ()
+
 				if (var1ModImgW == 0) {
-					// ASKPROF: % not member of Rep[Int]
 					// start of a new row! new scanline! (except when the extentY is more than 1)
-					genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, provisional)), array, arraySL, false) 
+					if ()
+					// loop through new list of first Var plus the two injected
+					// the list that i have to send here the first var, total of three Vars
+					genLoop(func.consumeFrom.get, /* new list */, xs2 ++ List((x._1, provisional)), array, arraySL, false) 
 				}
 			  } else { 
-			  // colMajor
+			  // colMajor sequential
 				if ( var1ModImgH == 0) {
 					// start of a new column! new scanline! (except when the extentX is more than 1)
-					genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, provisional)), array, arraySL, false) 
+					genLoop(func.consumeFrom.get, xs1, xs2 ++ List((x._1, x)), array, arraySL, false) 
 				}
 			  }
 
@@ -1354,6 +1367,7 @@ class ShonanTest extends TutorialFunSuite { self =>
      				  //| Map(y -> 1, injected1 -> 0, injected2 -> 0, x -> 0)
      				  //| Map(y -> 1, injected1 -> 0, injected2 -> 0, x -> 1)
                       //| Map(y -> 1, injected1 -> 0, injected2 -> 1, x -> 0)
+
                 for (x0 <- (0 until x._2.get): Rep[Range]) {
                 /*
                   // TODO: test if function will consume from another one
