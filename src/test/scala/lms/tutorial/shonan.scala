@@ -1407,19 +1407,10 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 
 			           	// Now recursevily call genloops 
-			           	// check Boolean value
-		            	x._3 match {   
-		            		case true => {
-								// List has first Var of original consumer loop, and the two Vars py and px 
-								for (x0 <- (0 until x._2): Rep[Range]) 
-									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
-		            		} case false => {
-								// List has original Vars of the consumer 
-								for (x0 <- (0 until x._2): Rep[Range]) 
-									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
-		            		}
-		            	} // end of match x._3
-
+						for (x0 <- (0 until x._2): Rep[Range]) 
+							genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
+		            
+						
 /*		                
 		                // x._2 has bound
 		              	val parBool = func.par getOrElse (x._1, false)
