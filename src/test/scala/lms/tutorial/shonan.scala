@@ -230,7 +230,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 // 1. Scheduling Functions (Multi-stage Pipelines)											
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	def scanline(func: Func): ((Int, Int), (Int, Int)) = {
+	def scanline(func: Func, array: Array[Array[Int]]): ((Int, Int), (Int, Int), (Int, Int)) = {
 		/* Purpose - Know which section or "chunk" of the pipeline producer to compute
 		** for consumer to use. Given an input object (an image with channels), 
 		** the x and y Vars can be Exprs like x+1, y-1. 
@@ -241,6 +241,9 @@ class ShonanTest extends TutorialFunSuite { self =>
 		println("Testing Scanline Function")
 		println("***********************************************************")
 		println(" ")
+
+		val imgH = array.length 
+		val imgW = array(0).length 
 
 		// identify which Var is in the given expression
 		var varFlagX: Boolean = false
@@ -376,12 +379,51 @@ class ShonanTest extends TutorialFunSuite { self =>
 		println("topY and extentY: " + startY + " , " + extentY)
 		println(" ")
 
+		// calculate the size of scanline (with no optimization)
+		var slH: Int = 0
+		var slW: Int = 0
+		
+		if (func.orderColMajor) {
+			// width
+			if (extentX == 0) 
+				slW = 1
+			else 
+				slW = extentX
+			
+			// height
+			if (slideAmountPositiveY + slideAmountPositiveY == 0) {
+				slH = imgH
+			} else {
+				var buffer = slideAmountPositiveY + slideAmountNegativeY
+				slH = imgH + buffer
+			}
+			
+		} else if (!func.orderColMajor) {
+			// width
+			if (slideAmountPositiveX + slideAmountPositiveX == 0) {
+				slW = imgW
+			} else {
+				var buffer = slideAmountPositiveX + slideAmountNegativeX
+				slW = imgW + buffer
+			}
+
+			// height
+			if (extentY == 0) 
+				slH = 1
+			else 
+				slH = extentY
+		} 
+		println("func.isColMajor: " + func.orderColMajor)
+		println("Scanline Height: " + slH)
+		println("Scanline Width: " + slW)
+		println(" ")
+
 		println("***********************************************************")
 		println("End of Scanline Function Test")
 		println("***********************************************************")
 		println(" ")
 
-		((startX, extentX), (startY, extentY))
+		((startX, extentX), (startY, extentY), (slH, slW))
 
 	} // end of def scanline
 
@@ -393,7 +435,7 @@ class ShonanTest extends TutorialFunSuite { self =>
   	} //end of testFuncSchedule
 */
 
-	def computeAt(consumer: Func, producer: Func, variable: Var): Unit = {
+	def computeAt(consumer: Func, producer: Func, variable: Var, array: Array[Array[Int]]): Unit = {
 		/* To inject the two for loops of producer into consumer's loopMap.
 		** User will call it, and then call realize on the consumer only, not the producer.
 		** User must identify the code of the Var before calling the function, 
@@ -409,7 +451,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 			consumer.orderColMajor = true
 
 		// Call scanline
-		val slValues: ((Int, Int), (Int, Int)) = scanline(consumer)
+		val slValues: ((Int, Int), (Int, Int), (Int, Int)) = scanline(consumer, array)
 		consumer.stX = Some((slValues._1)._1)
 		consumer.extX = Some((slValues._1)._2) 
 		consumer.stY = Some((slValues._2)._1)  
@@ -1276,10 +1318,12 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 			              	if (!xs2.isEmpty) { 
 			              		// If xs2 is empty, then it means we changed pixel, not necessarily a row!
-
+			              		// So we need to determine if need 
 				              	if (xs2.length == 2) {
 				              	// Then check if the lenght of xs2 is two, and then we can look at the value, and test...	
 									val current2ndVar = xs2(1)._2
+
+									val current1stVar = xs2(1)._1
 
 									val var2ndModImgW = (current2ndVar) - (current2ndVar/imgW)* imgW
 									val var2ndModImgH = (current2ndVar) - (current2ndVar/imgH)* imgH
@@ -1313,11 +1357,17 @@ class ShonanTest extends TutorialFunSuite { self =>
 			          	val injectedListBuffer = new ListBuffer[(Var, Int, Boolean)]()  
 			          
 			          	var provisional: Rep[Int] = unit(2)
+			          	var injY: Rep[Int] = unit(0)
+			          	var injX: Rep[Int] = unit(0)
 
+			          	// TODO determine which parts of the scanline can be reuse!!!! DONT FORGET. NO RECOMPUTATION
 			          	if (needToComputeSL) { 
 			          		// populate the injected List
-			          		// injectedList()
-			          		injectedListBuffer = ListBuffer((outerOriginal, provisional, true), (x, provisional, true), (y, provisional, true))
+
+			          		// get bounds 
+		          			
+
+			          		injectedListBuffer = ListBuffer((outerOriginal, provisional, true), (x, injX, true), (y, injY, true))
 							
 							val injectedList = injectedListBuffer.toList
 			          		// initial call, like the realize call
@@ -1404,13 +1454,20 @@ class ShonanTest extends TutorialFunSuite { self =>
 							    	- In the recursion, I cannot call another genloops (original again!)
 						   3. Call genloops on original List
 */
-
-
 			           	// Now recursevily call genloops 
-						for (x0 <- (0 until x._2): Rep[Range]) 
-							genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
-		            
-						
+			           	// check Boolean value
+		            	x._3 match {   
+		            		case true => {
+								// List has first Var of original consumer loop, and the two Vars py and px 
+								for (x0 <- (0 until x._2): Rep[Range]) 
+									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
+		            		} case false => {
+								// List has original Vars of the consumer 
+								for (x0 <- (0 until x._2): Rep[Range]) 
+									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
+		            		}
+		            	} // end of match x._3
+
 /*		                
 		                // x._2 has bound
 		              	val parBool = func.par getOrElse (x._1, false)
@@ -1515,20 +1572,19 @@ class ShonanTest extends TutorialFunSuite { self =>
 		//realize(brighter, width, height, imgArray)
 		//realize(hBlur, width, height, imgArray)
 
-		// TODO: where to allocate:
+		// Test various functions for start and extents ...................
+		scanline(vBlur, imgArray)
+		scanline(hBlur, imgArray)
 
 		// computeAt
 		// send as Some(array) or None if there are no 
-		computeAt(vBlur, hBlur, y)
-		realize(vBlur, width, height, imgArray)
+		//computeAt(vBlur, hBlur, y, imgArray)
+		//realize(vBlur, width, height, imgArray)
 
 		//val instExpr: ExprPrinter = new ExprPrinter(expr)
 		//println("test: " + inst.print(expr))
 
-		// Test various functions for start and extents ...................
-		//scanline(vBlur)
-		//scanline(hBlur)
-
+		
 		// Test consumer and producer Schedule!
 
 		val outputImage: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
