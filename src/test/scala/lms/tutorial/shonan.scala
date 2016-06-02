@@ -176,6 +176,8 @@ class ShonanTest extends TutorialFunSuite { self =>
 		var extY: Option[Int] = None
 		var stX: Option[Int] = None
 		var stY: Option[Int] = None
+		var slH: Option[Int] = None // no optimization
+		var slW: Option[Int] = None // no optimization
 
 		var prodW: Option[Int] = None
 		var prodH: Option[Int] = None
@@ -236,10 +238,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		** the x and y Vars can be Exprs like x+1, y-1. 
 		*/ 
 
-		println(" ")
-		println("***********************************************************")
-		println("Testing Scanline Function")
-		println("***********************************************************")
+		println(" -> Scanline Function <- ")
 		println(" ")
 
 		val imgH = array.length 
@@ -418,11 +417,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 		println("Scanline Width: " + slW)
 		println(" ")
 
-		println("***********************************************************")
-		println("End of Scanline Function Test")
-		println("***********************************************************")
-		println(" ")
-
 		((startX, extentX), (startY, extentY), (slH, slW))
 
 	} // end of def scanline
@@ -442,6 +436,9 @@ class ShonanTest extends TutorialFunSuite { self =>
 		** else it will throw an exception.
 		*/ 
 
+		println("	")
+		println(" -> ComputeAt <- ")
+		println("	")
 		consumer.consumeFrom = Some(producer)
 
 		// x -> 0, y -> 1
@@ -456,6 +453,11 @@ class ShonanTest extends TutorialFunSuite { self =>
 		consumer.extX = Some((slValues._1)._2) 
 		consumer.stY = Some((slValues._2)._1)  
 		consumer.extY = Some((slValues._2)._2)  
+		consumer.slH = Some((slValues._3)._1) 
+		consumer.slW = Some((slValues._3)._2)   
+
+		println(" -> End of ComputeAt <- ")
+      	println(" ")
 
 	} // end of def computeAt 
 
@@ -1323,8 +1325,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 				              	// Then check if the lenght of xs2 is two, and then we can look at the value, and test...	
 									val current2ndVar = xs2(1)._2
 
-									val current1stVar = xs2(1)._1
-
 									val var2ndModImgW = (current2ndVar) - (current2ndVar/imgW)* imgW
 									val var2ndModImgH = (current2ndVar) - (current2ndVar/imgH)* imgH
 
@@ -1347,27 +1347,26 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 		              	// TODO: calculate real numbers for injected Vars
 		              	// from def scanlines
+		
+			          	// TODO determine which parts of the scanline can be reuse
+			          	if (needToComputeSL) {
+							// populate the injected List
+							// to do dynamically do storage of scanline
 
-			          	val outerOriginal = new Var("outerOriginal")
-			          	val outerInjected = new Var("outerInjected")
-			          	val innerInjected = new Var("innerOriginal")
+							val outerOriginal = new Var("outerOriginal")
+				          	val outerInjected = new Var("outerInjected")
+				          	val innerInjected = new Var("innerOriginal")
 
-			          	val injectedVars = List(outerOriginal, outerInjected, innerInjected) 
-			          	// TODO: why define if func.cosumeFrom.get == None
-			          	val injectedListBuffer = new ListBuffer[(Var, Int, Boolean)]()  
-			          
-			          	var provisional: Rep[Int] = unit(2)
-			          	var injY: Rep[Int] = unit(0)
-			          	var injX: Rep[Int] = unit(0)
+				          	val injectedVars = List(outerOriginal, outerInjected, innerInjected) 
+				          	// TODO: why define if func.cosumeFrom.get == None
+				          	val injectedListBuffer = new ListBuffer[(Var, Int, Boolean)]()  
 
-			          	// TODO determine which parts of the scanline can be reuse!!!! DONT FORGET. NO RECOMPUTATION
-			          	if (needToComputeSL) { 
-			          		// populate the injected List
+				          	var injY: Rep[Int] = unit(func.slH.get)
+				          	var injX: Rep[Int] = unit(func.slW.get)
 
-			          		// get bounds 
-		          			
+				          	val current1stVar = xs2(0)._2
 
-			          		injectedListBuffer = ListBuffer((outerOriginal, provisional, true), (x, injX, true), (y, injY, true))
+			          		injectedListBuffer = ListBuffer((outerOriginal, current1stVar, true), (x, injX, true), (y, injY, true))
 							
 							val injectedList = injectedListBuffer.toList
 			          		// initial call, like the realize call
@@ -1569,12 +1568,12 @@ class ShonanTest extends TutorialFunSuite { self =>
         	} // end of def realize
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		//realize(brighter, width, height, imgArray)
+		realize(brighter, width, height, imgArray)
 		//realize(hBlur, width, height, imgArray)
 
 		// Test various functions for start and extents ...................
-		scanline(vBlur, imgArray)
-		scanline(hBlur, imgArray)
+		//scanline(vBlur, imgArray)
+		//scanline(hBlur, imgArray)
 
 		// computeAt
 		// send as Some(array) or None if there are no 
@@ -1584,14 +1583,13 @@ class ShonanTest extends TutorialFunSuite { self =>
 		//val instExpr: ExprPrinter = new ExprPrinter(expr)
 		//println("test: " + inst.print(expr))
 
-		
 		// Test consumer and producer Schedule!
 
 		val outputImage: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
 
 		for (x <- (0 until width): Range ; y <- (0 until height): Range) {
-		//checkingImage.setRGB(x, y, {imgArray(x).apply(y)} )
-		outputImage.setRGB(x, y, {imgArray(x)(y)} )
+			//checkingImage.setRGB(x, y, {imgArray(x).apply(y)} )
+			outputImage.setRGB(x, y, {imgArray(x)(y)} )
 		}
 
 		println("Checking the output image array! Saving the picture.")
@@ -1602,7 +1600,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		} // end of def snippet
 	} // end of val snippet
 
-    //snippet.eval()
+    snippet.eval()
     check("shonan-hmm1c", snippet.code)
 
   } // end of test Halide
