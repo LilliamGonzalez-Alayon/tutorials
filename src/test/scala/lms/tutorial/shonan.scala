@@ -161,6 +161,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		// Initially consume from no other function
 		// var code: Option[Int] = None 
 		var consumeFrom: Option[Func] = None
+		var isProducer: Boolean = false
 
 		// Ordering of vars from consumer
 		var orderColMajor: Boolean = false
@@ -179,8 +180,8 @@ class ShonanTest extends TutorialFunSuite { self =>
 		var slH: Option[Int] = None // no optimization
 		var slW: Option[Int] = None // no optimization
 
-		var prodW: Option[Int] = None
-		var prodH: Option[Int] = None
+		//var prodW: Option[Int] = None
+		//var prodH: Option[Int] = None
 
 		// don't have dimensions yet, need to wait....
 		//var slArray = new Array[Array[Nothing]](2) 
@@ -436,7 +437,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 		** else it will throw an exception.
 		*/ 
 
-		println("	")
 		println(" -> ComputeAt <- ")
 		println("	")
 		consumer.consumeFrom = Some(producer)
@@ -455,6 +455,8 @@ class ShonanTest extends TutorialFunSuite { self =>
 		consumer.extY = Some((slValues._2)._2)  
 		consumer.slH = Some((slValues._3)._1) 
 		consumer.slW = Some((slValues._3)._2)   
+
+		producer.isProducer = true
 
 		println(" -> End of ComputeAt <- ")
       	println(" ")
@@ -874,7 +876,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 	
 	// The value's list stays the same for the exprPrinter
 	val value = new Input (inImg, List(x, y, c))
-	val brighterExpr = new Mult (value, new Operand(1.2))
+	val brighterExpr = new Mult (value, new Operand(1.4))
 
 	// The function's list gets modified with the schedule
 	// Restrict to (x, y), in that order always???
@@ -1129,16 +1131,15 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 	        } // end of def trackVar 
 
-        	//////////////////////////////////////////////////////////////////////////////////////////////////////
         	def xyEval (func: Func, loopMap: Map[Var, Rep[Int]], imgWidth: Int, imgHeight: Int): (Rep[Int], Rep[Int]) = {
-				/* The Loopmap holds the bounds of the for loops.
-				** Find the x and y that will mapped in EvaluateExpr.
-				** The x and y can be different depending of what scheduling is used.
-				** For example, if it was fused it will be: varVal = ((loop(lookUpFused(0)) % w)).toInt 
-				**
-				** For each, x and y, calls trackVar function, which in turn calls trackNestedVar (if necessary).
-				** Returns a pair of Rep[Int], the x and y
-				*/ 
+			/* The Loopmap holds the bounds of the for loops.
+			** Find the x and y that will mapped in EvaluateExpr.
+			** The x and y can be different depending of what scheduling is used.
+			** For example, if it was fused it will be: varVal = ((loop(lookUpFused(0)) % w)).toInt 
+			**
+			** For each, x and y, calls trackVar function, which in turn calls trackNestedVar (if necessary).
+			** Returns a pair of Rep[Int], the x and y
+			*/ 
 
 				val xVal: Rep[Int] = trackVar(func, "x", func.track, loopMap, imgWidth, imgHeight)
 				val yVal: Rep[Int] = trackVar(func, "y", func.track, loopMap, imgWidth, imgHeight)
@@ -1146,18 +1147,278 @@ class ShonanTest extends TutorialFunSuite { self =>
 				(xVal, yVal)
 			} 
 
-      		//////////////////////////////////////////////////////////////////////////////////////////////////////
-      		// New Evaluate class [has to be here because of rep]
-// TODO: add scanlineArray Option Rep[Array[Array[Int]]]
-      		def evaluateExpr(expr: Expr, env: String => Rep[Double], array: Rep[Array[Array[Int]]]): Rep[Double] = { 
+// TODO: get repeated code out as functions!!!
+    		//def trackVarSL(env: String => Rep[Double], ): Unit = /*(([Rep[Int], [Rep[Int]))*/ {}
+
+    		// def eval(expr: Expr): Rep[Double] = expr match { }
+
+			def evaluateExpr(func: Func, expr: Expr, env: String => Rep[Double], array: Rep[Array[Array[Int]]], slArray: Rep[Array[Array[Int]]], outerVar: Option[Rep[Int]]): Rep[Double] = { 
+			/* expr - expression of the consumer, or expr from a func that doesn't consume from another func depending on caller
+			** env - maps x and y to the injected vars that range over the scanline
+			** slArray - it will read the array of the scanline
+			** It will only write in the img array, but the writing is done in genloops when this function call returns the color.
+			** outerVar - Need the outerVar to position correctly over the scanline array, or it will go out of bounds.
+			*/ 	
+				def eval(expr: Expr): Rep[Double] = {
+
+					if (func.consumeFrom == None) { // use the previous procedure
+
+						def evaluate(expr: Expr): Rep[Double] = expr match {
+			      			case Var(nm) => env(nm)
+			      			case Input (inImg, vars) => { 
+
+					            var x = unit(0) // FYI: var Rep[Int] - staging variable; won't generate code!
+					            var y = unit(0) 
+							    val varsArray = new Array[Expr](3)
+							    varsArray = vars.toArray.dropRight(1) // drop color channel Var
+
+							    for (i <- (0 until 2): Range) { 
+									// The order in which the were sent determines if they are x or y. Only two axis, x and y. 
+
+							      	if (varsArray(i).isInstanceOf[Var]) {  
+								        // Check Var code to decide which one gets assigned: 0 -> x, 1 -> y
+								        // Not by code, but with position here...
+								        // why? Because by default the user has to give x first, 
+								        // then y which will give a rowMajor traversal, to change the order, reorder function must be used
+
+							        	if (i == 0) {
+							          		val vr: Var = varsArray(0).asInstanceOf[Var] 
+							          		x = (env(vr.nm)).toInt
+
+							        	} else if (i == 1) {
+							          		val vr: Var = varsArray(1).asInstanceOf[Var] 
+							          		y = (env(vr.nm)).toInt
+							       		}
+
+							        } else if (varsArray(i).isInstanceOf[Expr]) { 
+								        // If it's not a Var, but an Expr, have to eval (the operation with env( vars( 0 ).nm)).toInt)
+								        // It will look for the value of the var en the env and then do the arit...
+
+								        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
+								        val imgH = array.length // gives me y (height), not x (width)
+								        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
+
+								        val varNM: PullVars = new PullVars(varsArray(i))
+								        val NM: String = (varNM.parameters (varsArray(i)) )
+
+							        	if (i == 0) {
+							          		x = (eval(vars(0))).toInt
+							          
+							          		if (x < 0 || x >= imgW)
+							            		x = (env(NM)).toInt 
+				
+							        	} else if (i == 1) {
+							         		y = (eval(vars(1))).toInt
+
+							          		if (y < 0 || y >= imgH)
+							            		y = (env(NM)).toInt
+							        	}
+							      	}
+
+							    } // end of for (i <- (0 until 2): Range) { 
+							    
+							    // x and y should now have the correct value (modified or unmodified)
+			//TODO: will always end up getting the same first values!
+							    val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
+							    var colorChl = 0
+							    var colorNm: String = ""
+
+							    if (!vars(2).isInstanceOf[Var]) {  
+							     	// No valid Expr in c (color channel Var)
+							      	throw new IllegalArgumentException("The color channel can not have an Expr.")
+							    }
+
+							    val vrColor: Var = vars(2).asInstanceOf[Var] 
+
+							    if (env(vrColor.nm) == 0) {
+							        //println("red channel")
+							        colorChl = (colour & 0x00FF0000) >>> 16  
+							        colorNm = "R"
+							    } else if (env(vrColor.nm) == 1) {
+							       // println("green channel")
+							        colorChl = ( colour & 0x0000FF00 ) >>> 8
+							        colorNm = "G"
+							    } else if (env(vrColor.nm) == 2) {
+							        //println("blue channel")
+							        colorChl = colour & 0x000000FF
+							        colorNm = "B"
+							    }
+
+							    //println("color channel at input " + colorChl.toDouble)
+							    colorChl.toDouble
+							    
+						  	} // end of Input Case
+						  	case Operand( number ) => number
+						  	case Sum( left , right ) => eval( left ) + eval( right )
+						   
+						      /* The loop for c takes care of this
+						         eval lR + eval RR
+						         eval lG + eval RG
+						         eval lB + eval RB
+						      */
+						   
+						  	case Subst( left , right ) => eval( left ) - eval( right )
+						  	case Mult( left , right ) => eval( left ) * eval( right ) 
+						  	case Div( left , right ) => eval( left ) / eval( right ) 
+						} // end of def evaluate
+
+						val num: Rep[Double] = evaluate(expr)
+			 			num
+
+					} else { // modify the previous procedure
+
+						// new map to correct position of the scanline image, get the value and then evaluate the consumer's expr
+						// (the outerInjected Var - the outerOriginal) - the top X or Y depending if col or row major
+
+						val outerV = env( "outerInjected" ) 
+						var newOuterV = outerV + outerVar.get // outerOriginal
+
+	// TODO: check that consumer and producer are schedule equivalent and order equivalent
+						if (func.orderColMajor) {
+							newOuterV = newOuterV - func.stY.get
+						} else if (!func.orderColMajor) {
+							newOuterV = newOuterV - func.stX.get
+						}
+
+						//var positionedEnv = Map( env( "outerInjected" ) -> xValue, env( 1 ) -> env get (env( 1 )) )
+
+						def evaluate(expr: Expr): Rep[Double] = expr match {
+			      			case Var(nm) => env(nm)
+			      			case Input (inImg, vars) => { 
+
+					            var x = unit(0) // FYI: var Rep[Int] - staging variable; won't generate code!
+					            var y = unit(0) 
+							    val varsArray = new Array[Expr](3)
+							    varsArray = vars.toArray.dropRight(1) // drop color channel Var
+
+							    for (i <- (0 until 2): Range) { 
+									// The order in which the were sent determines if they are x or y. Only two axis, x and y. 
+
+							      	if (varsArray(i).isInstanceOf[Var]) {  
+								        // Check Var code to decide which one gets assigned: 0 -> x, 1 -> y
+								        // Not by code, but with position here...
+								        // why? Because by default the user has to give x first, 
+								        // then y which will give a rowMajor traversal, to change the order, reorder function must be used
+
+							        	if (i == 0) {
+							          		val vr: Var = varsArray(0).asInstanceOf[Var] 
+							          		x = (env(vr.nm)).toInt
+
+							        	} else if (i == 1) {
+							          		val vr: Var = varsArray(1).asInstanceOf[Var] 
+							          		y = (env(vr.nm)).toInt
+							       		}
+
+							        } else if (varsArray(i).isInstanceOf[Expr]) { 
+								        // If it's not a Var, but an Expr, have to eval (the operation with env( vars( 0 ).nm)).toInt)
+								        // It will look for the value of the var en the env and then do the arit...
+
+								        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
+								        val imgH = array.length // gives me y (height), not x (width)
+								        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
+
+								        val varNM: PullVars = new PullVars(varsArray(i))
+								        val NM: String = (varNM.parameters (varsArray(i)) )
+
+							        	if (i == 0) {
+							          		x = (eval(vars(0))).toInt
+							          
+							          		if (x < 0 || x >= imgW)
+							            		x = (env(NM)).toInt 
+				
+							        	} else if (i == 1) {
+							         		y = (eval(vars(1))).toInt
+
+							          		if (y < 0 || y >= imgH)
+							            		y = (env(NM)).toInt
+							        	}
+							      	}
+
+							    } // end of for (i <- (0 until 2): Range) { 
+							    
+							    // x and y should now have the correct value (modified or unmodified)
+			//TODO: will always end up getting the same first values!
+							    val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
+							    var colorChl = 0
+							    var colorNm: String = ""
+
+							    if (!vars(2).isInstanceOf[Var]) {  
+							     	// No valid Expr in c (color channel Var)
+							      	throw new IllegalArgumentException("The color channel can not have an Expr.")
+							    }
+
+							    val vrColor: Var = vars(2).asInstanceOf[Var] 
+
+							    if (env(vrColor.nm) == 0) {
+							        //println("red channel")
+							        colorChl = (colour & 0x00FF0000) >>> 16  
+							        colorNm = "R"
+							    } else if (env(vrColor.nm) == 1) {
+							       // println("green channel")
+							        colorChl = ( colour & 0x0000FF00 ) >>> 8
+							        colorNm = "G"
+							    } else if (env(vrColor.nm) == 2) {
+							        //println("blue channel")
+							        colorChl = colour & 0x000000FF
+							        colorNm = "B"
+							    }
+
+							    //println("color channel at input " + colorChl.toDouble)
+							    colorChl.toDouble
+							    
+						  	} // end of Input Case
+						  	case Operand( number ) => number
+						  	case Sum( left , right ) => eval( left ) + eval( right )
+						   
+						      /* The loop for c takes care of this
+						         eval lR + eval RR
+						         eval lG + eval RG
+						         eval lB + eval RB
+						      */
+						   
+						  	case Subst( left , right ) => eval( left ) - eval( right )
+						  	case Mult( left , right ) => eval( left ) * eval( right ) 
+						  	case Div( left , right ) => eval( left ) / eval( right ) 
+						} // end of def evaluate
+
+						val num: Rep[Double] = evaluate(expr)
+			 			num
+			 		}
+
+				} // end of def eval
+
+				val number: Rep[Double] = eval(expr)
+		 		number
+
+			} // end of def evaluateExpr 
+
+      		def evaluateSLExpr(func: Func, expr: Expr, env: String => Rep[Double], array: Rep[Array[Array[Int]]], outerVar: Option[Rep[Int]]): Rep[Double] = { 
+      		/* expr - expression of the producer
+      		** env maps x and y to the injected vars (outerInjected, innerInjected) that range over the scanline
+			** array - It will read the array of the original image. 
+			** It will only write in the slArray, but the writing is done in genloops when this function call returns the color.
+			** outerVar - Need the outerVar to position correctly over original image, or it will just get to the same first pixels.
+			** 
+			*/ 
+				// new map to correct position of the original image
+				// the outerInjected Var + the outerOriginal - the top X or Y depending if col or row major
+				val outerV = env( "outerInjected" )
+				var newOuterV = outerV + outerVar.get // outerVar is outerOriginal
+
+// TODO: check that consumer and producer are schedule equivalent and order equivalent
+				if (func.orderColMajor) {
+					newOuterV = newOuterV - func.stY.get
+				} else if (!func.orderColMajor) {
+					newOuterV = newOuterV - func.stX.get
+				}
+
+				// second var does not change
+				var positionedEnv = Map(env("outerPositioned") -> newOuterV, env("innerPositioned") -> env("innerInjected"))
 
         		def eval(expr: Expr): Rep[Double] = expr match {
           			case Var(nm) => env(nm)
           			case Input (inImg, vars) => { 
-	            		// Vars can be Vars or Expr
-			            //apply (i : Int) : A , The element at given index.
-			            //val color: Rep[Int] = img(1).apply(2) // Source Context error
-	            
+	    
 			            var x = unit(0) // FYI: var Rep[Int] - staging variable; won't generate code!
 			            var y = unit(0) 
 					    val varsArray = new Array[Expr](3)
@@ -1167,7 +1428,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 							/* The order in which the were sent determines if they are x or y. 
 							Only two axis, x and y. */
 
-					      	//var str: String = vars(i).nm // No; if it's not a Var it can't get the string...
 					      	if (varsArray(i).isInstanceOf[Var]) {  
 						        // Check Var code to decide which one gets assigned: 0 -> x, 1 -> y
 						        // Not by code, but with position here...
@@ -1196,16 +1456,13 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 						        val varNM: PullVars = new PullVars(varsArray(i))
 						        val NM: String = (varNM.parameters (varsArray(i)) )
-						
 
 					        	if (i == 0) {
 					          		x = (eval(vars(0))).toInt
 					          
 					          		if (x < 0 || x >= imgW)
 					            		x = (env(NM)).toInt 
-					           			// how to access the var from within the expr
-					                	// nm is not member of expr
-
+		
 					        	} else if (i == 1) {
 					         		y = (eval(vars(1))).toInt
 
@@ -1213,10 +1470,10 @@ class ShonanTest extends TutorialFunSuite { self =>
 					            		y = (env(NM)).toInt
 					        	}
 					      	}
-
 					    } // end of for (i <- (0 until 2): Range) { 
 					    
 					    // x and y should now have the correct value (modified or unmodified)
+//TODO: will always end up getting the same first values!
 					    val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
 					    var colorChl = 0
 					    var colorNm: String = ""
@@ -1245,7 +1502,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 					    //println("color channel at input " + colorChl.toDouble)
 					    colorChl.toDouble
 					    
-
 				  	} // end of Input Case
 				  	case Operand( number ) => number
 				  	case Sum( left , right ) => eval( left ) + eval( right )
@@ -1264,7 +1520,7 @@ class ShonanTest extends TutorialFunSuite { self =>
       			val number: Rep[Double] = eval(expr)
      			number
 
-      		} // end of def evaluateExpr 
+      		} // end of def evaluateSLExpr 
 
 			def injectedList (xs: List[Var], flist: ListBuffer[(Var, Int, Boolean)], fn: Func): Unit = { 
 				/* Called from within genloop function.
@@ -1284,8 +1540,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 				} 
     		} // end of injectedList
 
-    		//////////////////////////////////////////////////////////////////////////////////////////////////////
-      		def genLoop(func: Func, xs: List[(Var, Int, Boolean)], xs2: List[(Var, Rep[Int])], array: Array[Array[Int]], arraySL: Option[Array[Array[Int]]], initialCall: Boolean): Unit = { 
+      		def genLoop(func: Func, xs: List[(Var, Int, Boolean)], xs2: List[(Var, Rep[Int])], array: Array[Array[Int]], slArray: Option[Array[Array[Int]]], initialCall: Boolean, outerVarNo: Option[Rep[Int]]): Unit = { 
 		        /* xs - final list with order and bounds
 		        ** xs2 - empty list in which we will generate the loopmap
 		        ** initial - one way to identify when to calculate first scanline!
@@ -1293,6 +1548,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		        */
 
 		        val img = staticData(array)
+		        val slImg = staticData(slArray.get)
 		        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
 		        val imgH = array.length // gives me y (height), not x (width)
 		        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
@@ -1302,15 +1558,13 @@ class ShonanTest extends TutorialFunSuite { self =>
 		        // create loopMap from List, a single map per pixel
 		        xs match {
 		            case Nil => {
-		            	if (func.consumeFrom != None) { 
-/*			            	Then there is multilevel scheduling, and we need to test where we are...
-			              	Must check which scheduling it's beign used, sequencial or tiling...
-			              	TODO: implement sequencial first! then move to tiling...
+	            	if (func.consumeFrom != None) { 
+			            	// Then there is multilevel scheduling, and we need to test where we are...
+			              	// Must check which scheduling it's beign used, sequencial or tiling...
 
-			              	We can only determine if we have to calculate a scanline inside the for loop, or
-			              	in the Nil case, where we can examine the xs2 with second Var (in case of sequencial traversal)
+			              	// We can only determine if we have to calculate a scanline inside the for loop, or
+			              	// in the Nil case, where we can examine the xs2 with second Var (in case of sequencial traversal)
 			              	
-*/
 			              	// HOW TO DETERMINE IF WE NEED TO CALCULATE SCANLINE, AND THEN CREATE THE LIST...
 								// Row Major, y outer loop, x inner loop; need to check the value of the x 
 								// x will be the second Var, how to manage the first iteration where xs2 still doesn't have the x value?
@@ -1320,13 +1574,16 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 			              	if (!xs2.isEmpty) { 
 			              		// If xs2 is empty, then it means we changed pixel, not necessarily a row!
-			              		// So we need to determine if need 
+			              		// So we need to determine if new scanline is needed
 				              	if (xs2.length == 2) {
 				              	// Then check if the lenght of xs2 is two, and then we can look at the value, and test...	
 									val current2ndVar = xs2(1)._2
 
 									val var2ndModImgW = (current2ndVar) - (current2ndVar/imgW)* imgW
 									val var2ndModImgH = (current2ndVar) - (current2ndVar/imgH)* imgH
+
+								    if (initialCall) 
+										needToComputeSL = true
 
 									if (func.orderColMajor) {
 										if (var2ndModImgH == 0)
@@ -1335,47 +1592,50 @@ class ShonanTest extends TutorialFunSuite { self =>
 									} else if (!func.orderColMajor) {
 										if (var2ndModImgW == 0)
 											needToComputeSL = true
-
-									} else if (initialCall) {
-										needToComputeSL = true
-									}
+									} 
 
 				                } // end of if (xs2.lenght == 2) {
 			                } // end of if (!xs2.isEmpty) {
 
 			            } // end of if (func.consumeFrom.get != None) { 
-
-		              	// TODO: calculate real numbers for injected Vars
-		              	// from def scanlines
 		
-			          	// TODO determine which parts of the scanline can be reuse
 			          	if (needToComputeSL) {
 							// populate the injected List
-							// to do dynamically do storage of scanline
-
 							val outerOriginal = new Var("outerOriginal")
 				          	val outerInjected = new Var("outerInjected")
 				          	val innerInjected = new Var("innerOriginal")
 
+				          	// give codes to the vars, to bee used by eval function inside the evaluateExpr and evaluateSLfuntion
+				          	if (func.orderColMajor) {
+				          		outerOriginal.code = 1
+				          		outerInjected.code = 1
+				          		innerInjected.code = 0
+				          	} else if (!func.orderColMajor) {
+				          		outerOriginal.code = 0
+				          		outerInjected.code = 0
+				          		innerInjected.code = 1
+				          	}
+
 				          	val injectedVars = List(outerOriginal, outerInjected, innerInjected) 
-				          	// TODO: why define if func.cosumeFrom.get == None
 				          	val injectedListBuffer = new ListBuffer[(Var, Int, Boolean)]()  
 
 				          	var injY: Rep[Int] = unit(func.slH.get)
 				          	var injX: Rep[Int] = unit(func.slW.get)
-
 				          	val current1stVar = xs2(0)._2
+			
+							if (func.orderColMajor) 
+								injectedListBuffer = ListBuffer((x, injX, true), (y, injY, true))
+							else if (!func.orderColMajor) 
+								injectedListBuffer = ListBuffer((y, injY, true), (x, injX, true))
 
-			          		injectedListBuffer = ListBuffer((outerOriginal, current1stVar, true), (x, injX, true), (y, injY, true))
-							
+			          		//injectedListBuffer = ListBuffer((x, injX, true), (y, injY, true))
 							val injectedList = injectedListBuffer.toList
+
 			          		// initial call, like the realize call
 			          		println("Initial call to a scanline!")
-			          		genLoop(func, injectedList, Nil, array, arraySL, false)
-			          		//genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
+			          		genLoop(func.consumeFrom.get, injectedList, Nil, array, slArray, false, Some(current1stVar))
 			          	}
 
-			          	/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 						// For each pixel we will enter the nil case once and evaluate the pixel color.
 						// xs2 will have one of these maps (corresponding to the single pixel).
 						//> Map(y -> 0, x -> 0, c -> 0) - Nil
@@ -1391,30 +1651,37 @@ class ShonanTest extends TutorialFunSuite { self =>
 						val xValue = xyPair._1
 						val yValue = xyPair._2
 		              
-		                // println("--------------------------------------------------------------------------------------")
 		                if (func.args.length == 2) { // Function without an input image
-
-		                    val pixelColor = (evaluateExpr(func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img)).toInt
-		                    img(xValue)(yValue) = pixelColor // unmodified x and y
-		           
-		                } else { 
-		                	// Function with an input image
+		                	if (func.isProducer) {
+		                		val pixelColor = (evaluateSLExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img, outerVarNo)).toInt
+// TODO: get real position; x & y
+// OJO con estos xValue, and yValue!!! Solo funciona en seq
+		                    	slImg(xValue)(yValue) = pixelColor // unmodified x and y
+		                	} else if (!func.isProducer) {
+		                		val pixelColor = (evaluateExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img, slImg, outerVarNo)).toInt
+		                    	img(xValue)(yValue) = pixelColor // unmodified x and y
+		                	}
+		                    
+		                } else { // Function with an input image
 		                    val newRGB = new Array[Rep[Int]](3)
 
 		                    for (c <- (0 until 3): Range) {
-		                    	// Function with an input image 
 		                    	//println( "3 chls For loop" )
-		                      	val pixelChl = (evaluateExpr(func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img)).toInt
-		                      	//newRGB( c ) = minRep(pixelChl) 
-		                      	//val pixel = staticData(pixelChl)
-		                
-		                      	newRGB(c) = pixelChl // clamp to 255 
-		                      	//newRGB(c) = minRep(pixelChl) // clamp to 255
+		                    	var pixelChl: Rep[Int] = unit(0)
+
+		                    	if (func.isProducer) {
+// OJO con estos xValue, and yValue!!! Solo funciona en seq
+		                			pixelChl = (evaluateSLExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, outerVarNo)).toInt
+		                		} else if (!func.isProducer) {
+		                			pixelChl = (evaluateExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, slImg, outerVarNo)).toInt
+		                		}
+
+		                      	newRGB(c) = minRep(pixelChl) // clamp to 255
 		                      	//println( "CC after eva: " + newRGB( c ) )
 		                      	//println( " " )
 		                    }
 
-		                    //FIX: clamp outside loop?
+//FIX: clamp outside loop?
 		                    //println( "Out of 3 chls For loop" )
 		                    val newR = newRGB( 0 )
 		                    val newG = newRGB( 1 )
@@ -1428,7 +1695,15 @@ class ShonanTest extends TutorialFunSuite { self =>
 		                    //val pixelColor : Rep[Int] = ( 255 << 24 ) | ( newR << 16 ) | ( newG << 8 ) | newB
 		                    val pixelColor = unit(alpha) | ( newR << 16 ) | ( newG << 8 ) | newB
 		                    //println("pixel color " + pixelColor)
-		                    img(xValue)(yValue) = pixelColor
+
+		                    if (func.isProducer) {
+// OJO con estos xValue, and yValue
+	                			slImg(xValue)(yValue) = pixelColor
+	                		} else if (!func.isProducer) {
+	                			img(xValue)(yValue) = pixelColor
+	                		}
+
+		                    //img(xValue)(yValue) = pixelColor
 		                    //img(x).update(y, pixelColor)
 		                    //println( "final color: " + fnl )
 		                    //outImg.setRGB(x, y, fnl)
@@ -1442,6 +1717,10 @@ class ShonanTest extends TutorialFunSuite { self =>
 */
 		            } case x::xs1 => { // xs: List[(Var, Int, Boolean)], xs2: List[(Var, Rep[Int])]
 
+		            	 for (x0 <- (0 until x._2): Rep[Range]) {
+                  			genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, slArray, false, outerVarNo)
+                		}
+
 /* 						1. Check if consumeFrom is None, if None we dont have to check img sizing or anything.
 			            		a. Check if we need to compute a new scanline; set a bool flag.
 			            			- Proceed checking only if xs2 is not empty and lenght is two (in the case of sequential traversal!)
@@ -1453,19 +1732,6 @@ class ShonanTest extends TutorialFunSuite { self =>
 							    	- In the recursion, I cannot call another genloops (original again!)
 						   3. Call genloops on original List
 */
-			           	// Now recursevily call genloops 
-			           	// check Boolean value
-		            	x._3 match {   
-		            		case true => {
-								// List has first Var of original consumer loop, and the two Vars py and px 
-								for (x0 <- (0 until x._2): Rep[Range]) 
-									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
-		            		} case false => {
-								// List has original Vars of the consumer 
-								for (x0 <- (0 until x._2): Rep[Range]) 
-									genLoop(func, xs1, xs2 ++ List((x._1, x0)), array, arraySL, false)
-		            		}
-		            	} // end of match x._3
 
 /*		                
 		                // x._2 has bound
@@ -1494,8 +1760,8 @@ class ShonanTest extends TutorialFunSuite { self =>
 			// Realize Function
 			////////////////////////////////////////////////////////////////////////////////////////
 
-        	def realize(func: Func, w: Int, h: Int, array: Array[Array[Int]]/*, arrayS: Option[Array[Array[Int]]]*/): Unit = { 
-          		println("Realizing " + func.nm + " Func") // will be printed in generated code...
+        	def realize(func: Func, w: Int, h: Int, array: Array[Array[Int]]): Unit = { 
+          		println("Realizing " + func.nm + " Func") 
 
           		val width: Int = w 
           		val height: Int = h 
@@ -1507,40 +1773,15 @@ class ShonanTest extends TutorialFunSuite { self =>
             	// Determine the size of the producer allocation and save it within the func itself.
 	        	if (func.consumeFrom != None) {  
 	          		// TODO: classify a function strategy! here -> if (func.Scheduling = sequencialComputation)
-	          		//val slArray2: Array[Array[Int]]
-	          		//val slArray2 = Array.ofDim[Int](100, 100)
-
 			        // Allocate space (correct amount of space for the strip of producer!)
-			        // Sequencial order: row or col size plus extents 
-			        // Tiling tile size + plus extents
-			        // vectorization?
 					// Get the array dimesions for testing if the evaluated Expr is out of bounds. 
-			        val imgH = array.length // gives me y (height), not x (width)
-			        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
-
-		        	if (!func.orderColMajor) { 
-						// rowMajor - default case
-						producerW = width + func.extX.get
-						if (func.extY.get != 0) {
-							producerH = 1 + func.extY.get
-						} else 
-							producerH = 1
-
-					} else { 
-					// colMajor
-						producerH = height + func.extY.get
-						if (func.extX.get != 0) {
-							producerW = 1 + func.extX.get
-						} else 
-							producerW = 1
-					}
-					
-					func.prodH = Some(producerH)
-				    func.prodW = Some(producerW) 
+					producerW = func.slW.get
+					producerH = func.slH.get
 
 	        	} // end of if (func.consumer != None)
-
+	
 		  		val injArray = scala.Array.ofDim[Int](producerW, producerH)
+
           		// Complete func's bounds map with the image dimensions.
           		completeBounds(func, width, height)
 
@@ -1552,24 +1793,26 @@ class ShonanTest extends TutorialFunSuite { self =>
           		// Modify the newly (empty) created ListBuffer[(Var, Int)].
           		// This ListBuffer will now have the order and all the loop bounds.
           		finalList(funcList, finalListBuffer, func) 
-				// TODO: func.buffer(0) not enough to test first Var!
+// TODO: func.buffer(0) not enough to test first Var!
+// TODO: img array mirror the pixels of out of bound access? Is it a good strategy? Convolutions use this technique
 
 				// edit final? No, can't put the producer's vars in the final list because
 				// genloops will stop at Nil and then evaluate the expression.
 				val fnlList = finalListBuffer.toList
           
-           		println("Generating loopMap /////////////////////////////////////////////////////////////")
+           		println("Generating loopMap...")
             	if (func.consumeFrom != None) { 
             		//val arrayS: Option[Array[Array[Int]]] = Some(Nil)
-          			genLoop(func, fnlList, Nil, array, Some(injArray)/*Some(func.slArray)*/, true) 
+          			genLoop(func, fnlList, Nil, array, Some(injArray), true, None) 
           		} else 
-            		genLoop(func, fnlList, Nil, array, None, true)
+            		genLoop(func, fnlList, Nil, array, None, true, None)
 
         	} // end of def realize
 
 		/////////////////////////////////////////////////////////////////////////////////////////////////
-		realize(brighter, width, height, imgArray)
+		//realize(brighter, width, height, imgArray)
 		//realize(hBlur, width, height, imgArray)
+		//realize(vBlur, width, height, imgArray)
 
 		// Test various functions for start and extents ...................
 		//scanline(vBlur, imgArray)
@@ -1577,25 +1820,18 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 		// computeAt
 		// send as Some(array) or None if there are no 
-		//computeAt(vBlur, hBlur, y, imgArray)
-		//realize(vBlur, width, height, imgArray)
-
-		//val instExpr: ExprPrinter = new ExprPrinter(expr)
-		//println("test: " + inst.print(expr))
-
-		// Test consumer and producer Schedule!
+		computeAt(vBlur, hBlur, y, imgArray)
+		realize(vBlur, width, height, imgArray)
 
 		val outputImage: BufferedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
 
-		for (x <- (0 until width): Range ; y <- (0 until height): Range) {
-			//checkingImage.setRGB(x, y, {imgArray(x).apply(y)} )
-			outputImage.setRGB(x, y, {imgArray(x)(y)} )
-		}
-
-		println("Checking the output image array! Saving the picture.")
-		ImageIO.write(outputImage, "png", new File("outputImgArray.png"))
-		// write returns: false if no appropriate writer is found
-		// change snippet to Boolean
+	    for (x <- (0 until width): Range ; y <- (0 until height): Range) 
+	      outputImage.setRGB(x, y, {imgArray(x)(y)} )
+	    
+	    println("Checking the output image array! Saving the picture.")
+	    ImageIO.write(outputImage, "png", new File("outputImgArray.png"))
+	    // write returns: false if no appropriate writer is found
+	    // change snippet to Boolean
 
 		} // end of def snippet
 	} // end of val snippet
