@@ -161,6 +161,9 @@ class ShonanTest extends TutorialFunSuite { self =>
 		// Initially consume from no other function
 		// var code: Option[Int] = None 
 		var consumeFrom: Option[Func] = None
+		var produceTo: Option[Func] = None
+
+		// what if its both? three step chain?
 		var isProducer: Boolean = false
 
 		// Ordering of vars from consumer
@@ -440,6 +443,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		println(" -> ComputeAt <- ")
 		println("	")
 		consumer.consumeFrom = Some(producer)
+		producer.produceTo = Some(consumer)
 
 		// x -> 0, y -> 1
 		if (variable.code == None)
@@ -463,7 +467,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 	} // end of def computeAt 
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 2. Scheduling Functions (Order of Domain Evaluation)
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1318,7 +1322,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 								        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
 
 								        val varNM: PullVars = new PullVars(varsArray(i))
-								        val NM: String = (varNM.parameters (varsArray(i)) )
+								        val NM: String = (varNM.parameters (varsArray(i)))
 
 							        	if (i == 0) {
 							          		x = (eval(vars(0))).toInt
@@ -1407,13 +1411,16 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 // TODO: check that consumer and producer are schedule equivalent and order equivalent
 				if (func.orderColMajor) {
-					newOuterV = newOuterV - func.stY.get
+					val consumer: Func = func.produceTo.get
+					newOuterV = newOuterV - consumer.stY.get
 				} else if (!func.orderColMajor) {
-					newOuterV = newOuterV - func.stX.get
+					val consumer: Func = func.produceTo.get
+					newOuterV = newOuterV - consumer.stX.get
 				}
 
 				// second var does not change
-				var positionedEnv = Map(env("outerPositioned") -> newOuterV, env("innerPositioned") -> env("innerInjected"))
+				//var positionedEnv = Map(env("outerPositioned") -> newOuterV, env("innerPositioned") -> env("innerInjected"))
+				var positionedEnv = Map("outerPositioned" -> newOuterV, "innerPositioned" -> env("innerInjected"))
 
         		def eval(expr: Expr): Rep[Double] = expr match {
           			case Var(nm) => env(nm)
@@ -1424,6 +1431,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 					    val varsArray = new Array[Expr](3)
 					    varsArray = vars.toArray.dropRight(1) // drop color channel Var
 
+ // when computing the scanline, the env carries the injected vars, not the x and y vars
 					    for (i <- (0 until 2): Range) { 
 							/* The order in which the were sent determines if they are x or y. 
 							Only two axis, x and y. */
@@ -1432,7 +1440,21 @@ class ShonanTest extends TutorialFunSuite { self =>
 						        // Check Var code to decide which one gets assigned: 0 -> x, 1 -> y
 						        // Not by code, but with position here...
 
-					        	if (i == 0) {
+// TODO: change this to used the code that the injected vars hold!
+						        if (i == 0) {
+						        	if (func.orderColMajor) 
+						        		x = (env("outerInjected")).toInt
+						        	else
+						        		x = (env("innerInjected")).toInt
+
+						        } else if (i == 1) {
+						        	if (func.orderColMajor) 
+						        		y = (env("innerInjected")).toInt
+						        	else
+						        		y = (env("outerInjected")).toInt	
+					       		}
+
+/*					        	if (i == 0) {
 					          		val vr: Var = varsArray(0).asInstanceOf[Var] 
 					          		x = (env(vr.nm)).toInt
 
@@ -1440,11 +1462,11 @@ class ShonanTest extends TutorialFunSuite { self =>
 					          		val vr: Var = varsArray(1).asInstanceOf[Var] 
 					          		y = (env(vr.nm)).toInt
 					       		}
+*/
 
 					        } else if (varsArray(i).isInstanceOf[Expr]) { 
 						        // TODO: Determine its a correct Expr? 
 						        // If it's not a Var, but an Expr, have to eval (the operation with env( vars( 0 ).nm)).toInt)
-
 						        // inf loop?? , no because it's not an input its just the expr... 
 						        // It will look for the value of the var en the env and then do the arit...
 
@@ -1456,24 +1478,41 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 						        val varNM: PullVars = new PullVars(varsArray(i))
 						        val NM: String = (varNM.parameters (varsArray(i)) )
+						       	
+						       	var xNM: String = ""
+						       	var yNM: String = ""
 
 					        	if (i == 0) {
-					          		x = (eval(vars(0))).toInt
+					        		if (func.orderColMajor) {
+						        		x = (env("outerInjected")).toInt
+						        		xNM = "outerInjected"
+					        		} else {
+						        		x = (env("innerInjected")).toInt
+						        		xNM = "innerInjected"
+					        		}
+					          		//x = (eval(vars(0))).toInt
 					          
 					          		if (x < 0 || x >= imgW)
-					            		x = (env(NM)).toInt 
+					            		x = (env(xNM)).toInt 
 		
 					        	} else if (i == 1) {
-					         		y = (eval(vars(1))).toInt
+					        		if (func.orderColMajor)  {
+						        		y = (env("innerInjected")).toInt
+						        		yNM = "innerInjected"
+					        		} else {
+						        		y = (env("outerInjected")).toInt	
+						        		yNM = "outerInjected"
+					        		}
+					         		//y = (eval(vars(1))).toInt
 
 					          		if (y < 0 || y >= imgH)
-					            		y = (env(NM)).toInt
+					            		y = (env(yNM)).toInt
 					        	}
 					      	}
 					    } // end of for (i <- (0 until 2): Range) { 
 					    
 					    // x and y should now have the correct value (modified or unmodified)
-//TODO: will always end up getting the same first values!
+// TODO: will always end up getting the same first values!
 					    val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
 					    var colorChl = 0
 					    var colorNm: String = ""
@@ -1559,43 +1598,42 @@ class ShonanTest extends TutorialFunSuite { self =>
 		        xs match {
 		            case Nil => {
 	            	if (func.consumeFrom != None) { 
-			            	// Then there is multilevel scheduling, and we need to test where we are...
-			              	// Must check which scheduling it's beign used, sequencial or tiling...
+		            	// Then there is multilevel scheduling, and we need to test where we are...
+		              	// Must check which scheduling it's beign used, sequencial or tiling...
+		              	// We can only determine if we have to calculate a scanline inside the for loop, or
+		              	// in the Nil case, where we can examine the xs2 with second Var (in case of sequencial traversal)
+		              	
+		              	// HOW TO DETERMINE IF WE NEED TO CALCULATE SCANLINE, AND THEN CREATE THE LIST...
+							// Row Major, y outer loop, x inner loop; need to check the value of the x 
+							// x will be the second Var, how to manage the first iteration where xs2 still doesn't have the x value?
+							// Col Major, x outer loop, y inner loop; need to check the value of y
+							// y will be the second Var, how to manage the first iteration where xs2 still doesn't have the y value?
+							// xs2 will be empty initially, at the beggining of every pixel map...
 
-			              	// We can only determine if we have to calculate a scanline inside the for loop, or
-			              	// in the Nil case, where we can examine the xs2 with second Var (in case of sequencial traversal)
-			              	
-			              	// HOW TO DETERMINE IF WE NEED TO CALCULATE SCANLINE, AND THEN CREATE THE LIST...
-								// Row Major, y outer loop, x inner loop; need to check the value of the x 
-								// x will be the second Var, how to manage the first iteration where xs2 still doesn't have the x value?
-								// Col Major, x outer loop, y inner loop; need to check the value of y
-								// y will be the second Var, how to manage the first iteration where xs2 still doesn't have the y value?
-								// xs2 will be empty initially, at the beggining of every pixel map...
+		              	if (!xs2.isEmpty) { 
+		              		// If xs2 is empty, then it means we changed pixel, not necessarily a row!
+		              		// So we need to determine if new scanline is needed
+			              	if (xs2.length == 2) {
+			              	// Then check if the lenght of xs2 is two, and then we can look at the value, and test...	
+								val current2ndVar = xs2(1)._2
 
-			              	if (!xs2.isEmpty) { 
-			              		// If xs2 is empty, then it means we changed pixel, not necessarily a row!
-			              		// So we need to determine if new scanline is needed
-				              	if (xs2.length == 2) {
-				              	// Then check if the lenght of xs2 is two, and then we can look at the value, and test...	
-									val current2ndVar = xs2(1)._2
+								val var2ndModImgW = (current2ndVar) - (current2ndVar/imgW)* imgW
+								val var2ndModImgH = (current2ndVar) - (current2ndVar/imgH)* imgH
 
-									val var2ndModImgW = (current2ndVar) - (current2ndVar/imgW)* imgW
-									val var2ndModImgH = (current2ndVar) - (current2ndVar/imgH)* imgH
+							    if (initialCall) 
+									needToComputeSL = true
 
-								    if (initialCall) 
+								if (func.orderColMajor) {
+									if (var2ndModImgH == 0)
 										needToComputeSL = true
 
-									if (func.orderColMajor) {
-										if (var2ndModImgH == 0)
-											needToComputeSL = true
+								} else if (!func.orderColMajor) {
+									if (var2ndModImgW == 0)
+										needToComputeSL = true
+								} 
 
-									} else if (!func.orderColMajor) {
-										if (var2ndModImgW == 0)
-											needToComputeSL = true
-									} 
-
-				                } // end of if (xs2.lenght == 2) {
-			                } // end of if (!xs2.isEmpty) {
+			                } // end of if (xs2.lenght == 2) {
+		                } // end of if (!xs2.isEmpty) {
 
 			            } // end of if (func.consumeFrom.get != None) { 
 		
@@ -1607,26 +1645,26 @@ class ShonanTest extends TutorialFunSuite { self =>
 
 				          	// give codes to the vars, to bee used by eval function inside the evaluateExpr and evaluateSLfuntion
 				          	if (func.orderColMajor) {
-				          		outerOriginal.code = 1
-				          		outerInjected.code = 1
-				          		innerInjected.code = 0
-				          	} else if (!func.orderColMajor) {
-				          		outerOriginal.code = 0
-				          		outerInjected.code = 0
-				          		innerInjected.code = 1
+				          		outerOriginal.code = Some(1)
+				          		outerInjected.code = Some(1)
+				          		innerInjected.code = Some(0)
+				          	} else {
+				          		outerOriginal.code = Some(0)
+				          		outerInjected.code = Some(0)
+				          		innerInjected.code = Some(1)
 				          	}
 
-				          	val injectedVars = List(outerOriginal, outerInjected, innerInjected) 
 				          	val injectedListBuffer = new ListBuffer[(Var, Int, Boolean)]()  
 
+// TODO: does have to be Rep[Int], no because slH and slW is known before hand right?
 				          	var injY: Rep[Int] = unit(func.slH.get)
 				          	var injX: Rep[Int] = unit(func.slW.get)
 				          	val current1stVar = xs2(0)._2
 			
 							if (func.orderColMajor) 
-								injectedListBuffer = ListBuffer((x, injX, true), (y, injY, true))
-							else if (!func.orderColMajor) 
-								injectedListBuffer = ListBuffer((y, injY, true), (x, injX, true))
+								injectedListBuffer = ListBuffer((outerInjected, injX, true), (innerInjected, injY, true))
+							else 
+								injectedListBuffer = ListBuffer((outerInjected, injY, true), (innerInjected, injX, true))
 
 			          		//injectedListBuffer = ListBuffer((x, injX, true), (y, injY, true))
 							val injectedList = injectedListBuffer.toList
@@ -1634,7 +1672,8 @@ class ShonanTest extends TutorialFunSuite { self =>
 			          		// initial call, like the realize call
 			          		println("Initial call to a scanline!")
 			          		genLoop(func.consumeFrom.get, injectedList, Nil, array, slArray, false, Some(current1stVar))
-			          	}
+
+			          	} // end of if (needToComputeSL) {
 
 						// For each pixel we will enter the nil case once and evaluate the pixel color.
 						// xs2 will have one of these maps (corresponding to the single pixel).
@@ -1647,19 +1686,59 @@ class ShonanTest extends TutorialFunSuite { self =>
 						// Get the array dimesions for fused Var case. 
 						val arrayH = array.length // gives me y (height), not x (width)
 						val arrayW = array(0).length // Array of two dimesions (an array inside an array). 
-						val xyPair = xyEval(func, loops, arrayW, arrayH)
-						val xValue = xyPair._1
-						val yValue = xyPair._2
+						
+						var xyPair: (Rep[Int], Rep[Int]) = (unit(0), unit(0))
+						var xValue: Rep[Int] = unit(0)
+						var yValue: Rep[Int] = unit(0)
+
+						val outerOriginal = new Var("outerOriginal")
+				        val outerInjected = new Var("outerInjected")
+				        val innerInjected = new Var("innerInjected")
+
+						// xy looks for var X, if the loops map has the injected vars it will not find it.
+						// if (xs(0)._1 == outerInjected) { // xs2 is a list, not a map. We can check if the first item in the list is outerInjected
+
+// TODO: Will it always have None when it's not injected?
+						if (outerVarNo == None) {
+
+							xyPair = xyEval(func, loops, arrayW, arrayH)
+							xValue = xyPair._1
+							yValue = xyPair._2
+							
+						} else if (outerVarNo == None) {
+
+							
+
+							var injMap: Map[String, Rep[Int]] = Map() 
+							//var injMap: Map[String, Int] = Map() 
+							xs2 foreach ((p) => { 
+								injMap = Map() ++ (xs2 map (pairs => (pairs._1, pairs._2)))})
+
+							if (func.orderColMajor) {
+				          		xValue = injMap.get("outerInjected").get // outerInjected
+								yValue = injMap.get("innerInjected").get // innerInjected
+
+				          	} else {
+				          		xValue = injMap.get("innnerInjected").get
+								yValue = injMap.get("outerInjected").get
+				          	}
+
+						} // end of if (outerVar != None) {}
 		              
 		                if (func.args.length == 2) { // Function without an input image
 		                	if (func.isProducer) {
-		                		val pixelColor = (evaluateSLExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img, outerVarNo)).toInt
-// TODO: get real position; x & y
-// OJO con estos xValue, and yValue!!! Solo funciona en seq
-		                    	slImg(xValue)(yValue) = pixelColor // unmodified x and y
+			                	var pixelColor: Rep[Int] = unit(0)
+
+			                	if (func.orderColMajor)
+		                			pixelColor = (evaluateSLExpr(func, func.expr, Map( outerInjected.nm -> xValue, innerInjected.nm -> yValue ), img, outerVarNo)).toInt
+		                    	else 
+		                    		pixelColor = (evaluateSLExpr(func, func.expr, Map( innerInjected.nm -> xValue, outerInjected.nm -> yValue ), img, outerVarNo)).toInt
+
+		                    	slImg(xValue)(yValue) = pixelColor 
+
 		                	} else if (!func.isProducer) {
 		                		val pixelColor = (evaluateExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue ), img, slImg, outerVarNo)).toInt
-		                    	img(xValue)(yValue) = pixelColor // unmodified x and y
+		                    	img(xValue)(yValue) = pixelColor 
 		                	}
 		                    
 		                } else { // Function with an input image
@@ -1670,8 +1749,12 @@ class ShonanTest extends TutorialFunSuite { self =>
 		                    	var pixelChl: Rep[Int] = unit(0)
 
 		                    	if (func.isProducer) {
-// OJO con estos xValue, and yValue!!! Solo funciona en seq
-		                			pixelChl = (evaluateSLExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, outerVarNo)).toInt
+		                    		if (func.orderColMajor) {
+		                				pixelChl = (evaluateSLExpr(func, func.expr, Map( outerInjected.nm -> xValue, innerInjected.nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, outerVarNo)).toInt
+		                    		} else {
+		                    			pixelChl = (evaluateSLExpr(func, func.expr, Map( innerInjected.nm -> xValue, outerInjected.nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, outerVarNo)).toInt
+		                				//pixelChl = (evaluateSLExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, outerVarNo)).toInt
+		                			}
 		                		} else if (!func.isProducer) {
 		                			pixelChl = (evaluateExpr(func, func.expr, Map( func.args( 0 ).nm -> xValue, func.args( 1 ).nm -> yValue, func.args( 2 ).nm -> unit(c) ), img, slImg, outerVarNo)).toInt
 		                		}
@@ -1679,7 +1762,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 		                      	newRGB(c) = minRep(pixelChl) // clamp to 255
 		                      	//println( "CC after eva: " + newRGB( c ) )
 		                      	//println( " " )
-		                    }
+		                    } // end of for (c <- (0 until 3): Range) {
 
 //FIX: clamp outside loop?
 		                    //println( "Out of 3 chls For loop" )
@@ -1801,11 +1884,12 @@ class ShonanTest extends TutorialFunSuite { self =>
 				val fnlList = finalListBuffer.toList
           
            		println("Generating loopMap...")
-            	if (func.consumeFrom != None) { 
-            		//val arrayS: Option[Array[Array[Int]]] = Some(Nil)
-          			genLoop(func, fnlList, Nil, array, Some(injArray), true, None) 
-          		} else 
-            		genLoop(func, fnlList, Nil, array, None, true, None)
+            	if (func.consumeFrom == None) { 
+          			genLoop(func, fnlList, Nil, array, None, true, None)
+          		} else {
+          			//val arrayS: Option[Array[Array[Int]]] = Some(Nil)
+            		genLoop(func, fnlList, Nil, array, Some(injArray), true, None) 
+          		}
 
         	} // end of def realize
 
