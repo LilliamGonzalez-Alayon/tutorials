@@ -1446,7 +1446,9 @@ class ShonanTest extends TutorialFunSuite { self =>
 				// new map to correct position of the original image
 				// the outerInjected Var + the outerOriginal - the top X or Y depending if col or row major
 				val outerV = env("outerInjected")
-				var newOuterV = outerV + outerVar.get // outerVar is outerOriginal
+				//var newOuterV = unit((outerV + outerVar.get).toInt) // outerVar is outerOriginal
+				var newOuterV = outerV + outerVar.get
+
 
 				if (func.orderColMajor) {
 					val consumer: Func = func.produceTo.get
@@ -1459,7 +1461,7 @@ class ShonanTest extends TutorialFunSuite { self =>
 				// second var does not change
 				val opS: String = "outerPositioned"
 				//var positionedEnv = Map(env("outerPositioned") -> newOuterV, env("innerPositioned") -> env("innerInjected"))
-				val positionedEnv: String => Rep[Double] = Map("outerPositioned" -> newOuterV, "innerPositioned" -> env("innerInjected")) // OJO
+				val pEnv: String => Rep[Double] = Map("outerPositioned" -> newOuterV, "innerPositioned" -> env("innerInjected")) // OJO
 
         		def eval(expr: Expr): Rep[Double] = expr match {
           			case Var(nm) => env(nm)
@@ -1469,6 +1471,12 @@ class ShonanTest extends TutorialFunSuite { self =>
 			            var y = unit(0) 
 					    val varsArray = new Array[Expr](3)
 					    varsArray = vars.toArray.dropRight(1) // drop color channel Var
+
+					    // OutofBounds array
+				        // How to access w and h?
+				        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
+				        val imgH = array.length // gives me y (height), not x (width)
+				        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
 
  // when computing the scanline, the env carries the injected vars, not the x and y vars
 					    for (i <- (0 until 2): Range) { 
@@ -1480,28 +1488,29 @@ class ShonanTest extends TutorialFunSuite { self =>
 						        // Not by code, but with position here...
 
 // TODO: change this to used the code that the injected vars hold!
+
 						        if (i == 0) {
-						        	if (func.orderColMajor) 
-						        		x = (env("outerInjected")).toInt
-						        	else
-						        		x = (env("innerInjected")).toInt
+						        	if (func.orderColMajor) {
+						        		x = (pEnv("outerPositioned")).toInt
+						        	} else if (!func.orderColMajor) {
+						        		x = (pEnv("innerPositioned")).toInt
+						        	}
+
+						        	if (x < 0 || x >= imgW) {
+					            		x = 23
+						        	}
 
 						        } else if (i == 1) {
-						        	if (func.orderColMajor) 
-						        		y = (env("innerInjected")).toInt
-						        	else
-						        		y = (env("outerInjected")).toInt	
-					       		}
+						        	if (func.orderColMajor) {
+						        		y = (pEnv("innerPositioned")).toInt
+						        	} else if (!func.orderColMajor) {
+						        		y = (pEnv("outerPositioned")).toInt	
+						        	}
 
-/*					        	if (i == 0) {
-					          		val vr: Var = varsArray(0).asInstanceOf[Var] 
-					          		x = (env(vr.nm)).toInt
-
-					        	} else if (i == 1) {
-					          		val vr: Var = varsArray(1).asInstanceOf[Var] 
-					          		y = (env(vr.nm)).toInt
+						        	if (y < 0 || y >= imgH) {
+					          			y = 23
+						        	}
 					       		}
-*/
 
 					        } else if (varsArray(i).isInstanceOf[Expr]) { 
 						        // TODO: Determine its a correct Expr? 
@@ -1512,50 +1521,56 @@ class ShonanTest extends TutorialFunSuite { self =>
 						        // OutofBounds array
 						        // How to access w and h?
 						        // Get the array dimesions for testing if the evaluated Expr is out of bounds. 
-						        val imgH = array.length // gives me y (height), not x (width)
-						        val imgW = array(0).length // Array of two dimesions is an array inside an array. 
+						        //val imgH = array.length // gives me y (height), not x (width)
+						        //val imgW = array(0).length // Array of two dimesions is an array inside an array. 
 
 						        val varNM: PullVars = new PullVars(varsArray(i))
-						        val NM: String = (varNM.parameters (varsArray(i)) )
+						        val NM: String = (varNM.parameters (varsArray(i)))
 						       	
 						       	var xNM: String = ""
 						       	var yNM: String = ""
 
-					        	if (i == 0) {
-					        		if (func.orderColMajor) {
-						        		x = (env("outerInjected")).toInt
-						        		xNM = "outerInjected"
+					        	if (i == 0) { // x
+					        		if (func.orderColMajor) {	
+
+						        		val intEnv = Map( "x" -> unit(newOuterV), "y" -> env("innerPositioned"))
+										val position = evaluatePositionedExpr(vars(0), intEnv) 
+										x = position
+
 					        		} else {
-						        		x = (env("innerInjected")).toInt
-						        		xNM = "innerInjected"
+						        		val intEnv = Map( "x" -> env("innerPositioned", "y" -> unit(newOuterV)))
+										val position = evaluatePositionedExpr(vars(0), intEnv) 
+										x = position
 					        		}
-					          		//x = (eval(vars(0))).toInt
-					          
+					          		
 					          		if (x < 0 || x >= imgW)
-					            		x = (env(xNM)).toInt 
+					            		x = 23
 		
-					        	} else if (i == 1) {
-					        		if (func.orderColMajor)  {
-						        		y = (env("innerInjected")).toInt
-						        		yNM = "innerInjected"
+					        	} else if (i == 1) { // y
+					        		if (func.orderColMajor) {	
+
+						        		val intEnv = Map( "x" -> unit(newOuterV), "y" -> env("innerPositioned"))
+										val position = evaluatePositionedExpr(vars(1), intEnv) 
+										
+										y = position
+
 					        		} else {
-						        		y = (env("outerInjected")).toInt	
-						        		yNM = "outerInjected"
+						        		val intEnv = Map( "x" -> env("innerPositioned", "y" -> unit(newOuterV)))
+										val position = evaluatePositionedExpr(vars(1), intEnv) 
+										
+										y = position
 					        		}
-					         		//y = (eval(vars(1))).toInt
 
 					          		if (y < 0 || y >= imgH)
-					            		y = (env(yNM)).toInt
+					          			y = 23
+					            		//y = (env(yNM)).toInt
 					        	}
 					      	}
 					    } // end of for (i <- (0 until 2): Range) { 
 					    
 					    // x and y should now have the correct value (modified or unmodified)
-// TODO: will always end up getting the same first values!
-//OJO	
-
-					    //val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
-					    val colour: Rep[Int] = array(12).apply(12)
+					    val colour: Rep[Int] = array(readVar(x)).apply(readVar(y))
+					    //val colour: Rep[Int] = array(readVar(x)).apply(12)
 
 					    var colorChl = 0
 					    var colorNm: String = ""
@@ -1865,12 +1880,13 @@ class ShonanTest extends TutorialFunSuite { self =>
 		                    // actually do the writing with the numbers returned from evaluate expressions functions
 		                    if (func.isProducer) {
 	                			slImg(xValue)(yValue) = pixelColor
-	                			slImg(xValue)(yValue) = unit(alpha) | (255 << 16) | (0 << 8)  | 0
+	                			//slImg(xValue)(yValue) = unit(alpha) | (255 << 16) | (13 << 8)  | 0
 	                		} else if (!func.isProducer) {
 	                			img(xValue)(yValue) = pixelColor
-	                			img(xValue)(yValue) = unit(alpha) | (255 << 16) | (0 << 8)  | 0
+	                			//img(xValue)(yValue) = unit(alpha) | (255 << 16) | (0 << 8)  | 0
 	                		}
 
+	                		//slImg(12)(1) = unit(alpha) | (255 << 16) | (0 << 8)  | 0
 		                    //img(xValue)(yValue) = pixelColor
 		                    //img(x).update(y, pixelColor)
 		                    //println( "final color: " + fnl )
@@ -1992,7 +2008,7 @@ class ShonanTest extends TutorialFunSuite { self =>
          		val injImage: BufferedImage = new BufferedImage(producerW, producerH, BufferedImage.TYPE_INT_ARGB)
 
 			    for (x <- (0 until producerW): Range ; y <- (0 until producerH): Range) 
-			      injImage.setRGB(x, y, {injArray(x)(y)})
+			      injImage.setRGB(x, y, {slArray(x)(y)})
 
 			    ImageIO.write(injImage, "png", new File("injImgArray.png"))
 
